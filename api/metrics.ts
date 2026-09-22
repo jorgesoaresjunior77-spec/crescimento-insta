@@ -323,24 +323,26 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
   }
 }
 
-export default async function handler(request: Request): Promise<Response> {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    return errorResponse("DATABASE_URL não configurada no servidor.", 500);
-  }
-  const sql = neon(databaseUrl);
+export default {
+  async fetch(request: Request): Promise<Response> {
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) {
+      return errorResponse("DATABASE_URL não configurada no servidor.", 500);
+    }
+    const sql = neon(databaseUrl);
 
-  switch (request.method) {
-    case "GET":
-      return handleGet(request, sql);
-    case "POST":
-      return handlePost(request, sql);
-    case "PATCH":
-      return handlePatch(request, sql);
-    default:
-      return new Response(JSON.stringify({ error: "Método não permitido." }), {
-        status: 405,
-        headers: { "content-type": "application/json", allow: "GET, POST, PATCH" },
-      });
-  }
-}
+    switch (request.method) {
+      case "GET":
+        return handleGet(request, sql);
+      case "POST":
+        return handlePost(request, sql);
+      case "PATCH":
+        return handlePatch(request, sql);
+      default:
+        return new Response(JSON.stringify({ error: "Método não permitido." }), {
+          status: 405,
+          headers: { "content-type": "application/json", allow: "GET, POST, PATCH" },
+        });
+    }
+  },
+};

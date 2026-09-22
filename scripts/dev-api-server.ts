@@ -28,7 +28,7 @@ async function main() {
     pathToFileURL(path.join(projectRoot, "api/metrics.ts")).href
   );
 
-  const routes: Record<string, (req: Request) => Promise<Response>> = {
+  const routes: Record<string, { fetch: (req: Request) => Promise<Response> }> = {
     "/api/accounts": accountsHandler,
     "/api/metrics": metricsHandler,
   };
@@ -54,7 +54,7 @@ async function main() {
         headers: hasBody ? { "content-type": nodeReq.headers["content-type"] ?? "application/json" } : undefined,
         body: hasBody && chunks.length > 0 ? Buffer.concat(chunks) : undefined,
       });
-      const webRes = await handler(webReq);
+      const webRes = await handler.fetch(webReq);
       const body = await webRes.text();
       const headers: Record<string, string> = {};
       webRes.headers.forEach((value, key) => {

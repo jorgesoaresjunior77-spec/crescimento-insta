@@ -1,21 +1,27 @@
 import { useState } from 'react'
 import type { DailyMetric, NewMetricInput } from '../lib/api'
-import { AGE_RANGES, GENDERS, GENDER_LABELS, parseOptionalInt, parseRequiredInt, percentage, formatPercent } from '../lib/metrics'
+import { AGE_RANGES, GENDERS, GENDER_LABELS, parseOptionalInt, parseRequiredInt, percentage, formatPercentBR } from '../lib/metrics'
 
 const OPTIONAL_INT_FIELDS = [
   'reach',
   'interactions',
   'profile_visits',
-  'posts_published',
   'views_total',
   'views_from_followers',
   'views_from_non_followers',
   'viewers_total',
-  'views_stories',
-  'views_posts',
-  'views_reels',
+  'views_stories_followers',
+  'views_stories_non_followers',
+  'views_posts_followers',
+  'views_posts_non_followers',
+  'views_reels_followers',
+  'views_reels_non_followers',
   'interactions_from_followers',
   'interactions_from_non_followers',
+  'interactions_stories_followers',
+  'interactions_stories_non_followers',
+  'interactions_posts_followers',
+  'interactions_posts_non_followers',
   'replies',
   'shares',
   'likes',
@@ -27,16 +33,22 @@ const FIELD_LABELS: Record<OptionalIntField, string> = {
   reach: 'Alcance',
   interactions: 'Interações totais',
   profile_visits: 'Visitas ao perfil',
-  posts_published: 'Posts publicados',
   views_total: 'Visualizações totais',
   views_from_followers: 'Visualizações de seguidores',
   views_from_non_followers: 'Visualizações de não seguidores',
-  viewers_total: 'Visualizadores (contas únicas)',
-  views_stories: 'Visualizações em Stories',
-  views_posts: 'Visualizações em Posts',
-  views_reels: 'Visualizações em Reels',
+  viewers_total: 'Visualizadores',
+  views_stories_followers: 'Stories',
+  views_stories_non_followers: 'Stories',
+  views_posts_followers: 'Posts',
+  views_posts_non_followers: 'Posts',
+  views_reels_followers: 'Reels',
+  views_reels_non_followers: 'Reels',
   interactions_from_followers: 'Interações de seguidores',
   interactions_from_non_followers: 'Interações de não seguidores',
+  interactions_stories_followers: 'Stories',
+  interactions_stories_non_followers: 'Stories',
+  interactions_posts_followers: 'Posts',
+  interactions_posts_non_followers: 'Posts',
   replies: 'Respostas',
   shares: 'Compartilhamentos',
   likes: 'Curtidas',
@@ -51,11 +63,12 @@ interface LocationDraft {
 type FormValues = {
   date: string
   followers: string
+  posts_published: string
   note: string
 } & Record<OptionalIntField, string>
 
 function emptyFormValues(): FormValues {
-  const base = { date: '', followers: '', note: '' } as FormValues
+  const base = { date: '', followers: '', posts_published: '', note: '' } as FormValues
   for (const field of OPTIONAL_INT_FIELDS) base[field] = ''
   return base
 }
@@ -64,6 +77,7 @@ function metricToFormValues(m: DailyMetric): FormValues {
   const base = {
     date: m.date.slice(0, 10),
     followers: String(m.followers),
+    posts_published: m.posts_published === null ? '' : String(m.posts_published),
     note: m.note ?? '',
   } as FormValues
   for (const field of OPTIONAL_INT_FIELDS) {
@@ -110,14 +124,27 @@ interface MetricFormProps {
   error: string | null
   onSubmit: (input: NewMetricInput) => void
   onCancel?: () => void
+  onDelete?: () => void
+  deleting?: boolean
 }
 
-export default function MetricForm({ accountId, mode, initial, submitting, error, onSubmit, onCancel }: MetricFormProps) {
+export default function MetricForm({
+  accountId,
+  mode,
+  initial,
+  submitting,
+  error,
+  onSubmit,
+  onCancel,
+  onDelete,
+  deleting,
+}: MetricFormProps) {
   const [values, setValues] = useState<FormValues>(() => (initial ? metricToFormValues(initial) : emptyFormValues()))
   const [ageDrafts, setAgeDrafts] = useState<Record<string, string>>(() => metricToAgeDrafts(initial))
   const [genderDrafts, setGenderDrafts] = useState<Record<string, string>>(() => metricToGenderDrafts(initial))
   const [locationDrafts, setLocationDrafts] = useState<LocationDraft[]>(() => metricToLocationDrafts(initial))
   const [fieldError, setFieldError] = useState<string | null>(null)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   function setField(field: OptionalIntField, raw: string) {
     setValues((v) => ({ ...v, [field]: raw }))
@@ -153,6 +180,11 @@ export default function MetricForm({ accountId, mode, initial, submitting, error
     const followers = parseRequiredInt(values.followers)
     if (followers === 'invalid') {
       setFieldError('Seguidores deve ser um número inteiro maior ou igual a 0.')
+      return
+    }
+    const postsPublished = parseOptionalInt(values.posts_published)
+    if (postsPublished === 'invalid') {
+      setFieldError('Posts deve ser um número inteiro maior ou igual a 0.')
       return
     }
 
@@ -206,20 +238,27 @@ export default function MetricForm({ accountId, mode, initial, submitting, error
       account_id: accountId,
       date: values.date,
       followers,
+      posts_published: postsPublished,
+      note: values.note.trim() === '' ? null : values.note.trim(),
       reach: parsedOptional.reach ?? null,
       interactions: parsedOptional.interactions ?? null,
       profile_visits: parsedOptional.profile_visits ?? null,
-      posts_published: parsedOptional.posts_published ?? null,
-      note: values.note.trim() === '' ? null : values.note.trim(),
       views_total: parsedOptional.views_total ?? null,
       views_from_followers: parsedOptional.views_from_followers ?? null,
       views_from_non_followers: parsedOptional.views_from_non_followers ?? null,
       viewers_total: parsedOptional.viewers_total ?? null,
-      views_stories: parsedOptional.views_stories ?? null,
-      views_posts: parsedOptional.views_posts ?? null,
-      views_reels: parsedOptional.views_reels ?? null,
+      views_stories_followers: parsedOptional.views_stories_followers ?? null,
+      views_stories_non_followers: parsedOptional.views_stories_non_followers ?? null,
+      views_posts_followers: parsedOptional.views_posts_followers ?? null,
+      views_posts_non_followers: parsedOptional.views_posts_non_followers ?? null,
+      views_reels_followers: parsedOptional.views_reels_followers ?? null,
+      views_reels_non_followers: parsedOptional.views_reels_non_followers ?? null,
       interactions_from_followers: parsedOptional.interactions_from_followers ?? null,
       interactions_from_non_followers: parsedOptional.interactions_from_non_followers ?? null,
+      interactions_stories_followers: parsedOptional.interactions_stories_followers ?? null,
+      interactions_stories_non_followers: parsedOptional.interactions_stories_non_followers ?? null,
+      interactions_posts_followers: parsedOptional.interactions_posts_followers ?? null,
+      interactions_posts_non_followers: parsedOptional.interactions_posts_non_followers ?? null,
       replies: parsedOptional.replies ?? null,
       shares: parsedOptional.shares ?? null,
       likes: parsedOptional.likes ?? null,
@@ -243,18 +282,6 @@ export default function MetricForm({ accountId, mode, initial, submitting, error
     )
   }
 
-  const viewsSumMismatch =
-    values.views_total !== '' &&
-    values.views_from_followers !== '' &&
-    values.views_from_non_followers !== '' &&
-    Number(values.views_from_followers) + Number(values.views_from_non_followers) !== Number(values.views_total)
-
-  const interactionsSumMismatch =
-    values.interactions !== '' &&
-    values.interactions_from_followers !== '' &&
-    values.interactions_from_non_followers !== '' &&
-    Number(values.interactions_from_followers) + Number(values.interactions_from_non_followers) !== Number(values.interactions)
-
   return (
     <form className="metric-form-v2" onSubmit={handleSubmit}>
       <fieldset>
@@ -268,53 +295,86 @@ export default function MetricForm({ accountId, mode, initial, submitting, error
             Seguidores totais
             <input type="number" min={0} required value={values.followers} onChange={(e) => setValues((v) => ({ ...v, followers: e.target.value }))} />
           </label>
-          {numberField('posts_published')}
-          {numberField('profile_visits')}
+          <label>
+            Posts
+            <input
+              type="number"
+              min={0}
+              placeholder="indisponível"
+              value={values.posts_published}
+              onChange={(e) => setValues((v) => ({ ...v, posts_published: e.target.value }))}
+            />
+          </label>
         </div>
       </fieldset>
 
-      <fieldset>
+      <fieldset className="card-visualizacoes">
         <legend>Visualizações</legend>
         <div className="field-grid">
-          {numberField('reach')}
           {numberField('views_total')}
           {numberField('viewers_total')}
           {numberField('views_from_followers')}
           {numberField('views_from_non_followers')}
+          {numberField('reach')}
         </div>
-        {viewsSumMismatch && (
-          <p className="field-hint">
-            Seguidores + não seguidores ({Number(values.views_from_followers) + Number(values.views_from_non_followers)}) não bate com o
-            total ({values.views_total}).
-          </p>
-        )}
-        <div className="field-grid">
-          {numberField('views_stories')}
-          {numberField('views_posts')}
-          {numberField('views_reels')}
+
+        <h4>Por tipo de conteúdo</h4>
+        <div className="two-col-audience">
+          <div className="audience-col">
+            <span className="audience-col-title">Seguidores</span>
+            {numberField('views_stories_followers')}
+            {numberField('views_posts_followers')}
+            {numberField('views_reels_followers')}
+          </div>
+          <div className="audience-col">
+            <span className="audience-col-title">Não seguidores</span>
+            {numberField('views_stories_non_followers')}
+            {numberField('views_posts_non_followers')}
+            {numberField('views_reels_non_followers')}
+          </div>
         </div>
+
+        <div className="field-grid">{numberField('profile_visits')}</div>
       </fieldset>
 
-      <fieldset>
+      <fieldset className="card-interacoes">
         <legend>Interações</legend>
         <div className="field-grid">
           {numberField('interactions')}
           {numberField('interactions_from_followers')}
           {numberField('interactions_from_non_followers')}
         </div>
-        {interactionsSumMismatch && (
-          <p className="field-hint">
-            Seguidores + não seguidores ({Number(values.interactions_from_followers) + Number(values.interactions_from_non_followers)})
-            não bate com o total ({values.interactions}).
-          </p>
-        )}
-        <div className="field-grid">
-          {numberField('likes')}
-          {numberField('comments')}
-          {numberField('shares')}
-          {numberField('replies')}
+
+        <h4>Por tipo de conteúdo</h4>
+        <div className="two-col-audience">
+          <div className="audience-col">
+            <span className="audience-col-title">Seguidores</span>
+            {numberField('interactions_stories_followers')}
+            {numberField('interactions_posts_followers')}
+          </div>
+          <div className="audience-col">
+            <span className="audience-col-title">Não seguidores</span>
+            {numberField('interactions_stories_non_followers')}
+            {numberField('interactions_posts_non_followers')}
+          </div>
         </div>
       </fieldset>
+
+      <div className="por-interacao">
+        <h4>Por interação</h4>
+        <div className="two-col-audience">
+          <fieldset className="sub-card">
+            <legend>Stories</legend>
+            {numberField('replies')}
+            {numberField('shares')}
+          </fieldset>
+          <fieldset className="sub-card">
+            <legend>Posts</legend>
+            {numberField('likes')}
+            {numberField('comments')}
+          </fieldset>
+        </div>
+      </div>
 
       <fieldset>
         <legend>Audiência — localização</legend>
@@ -361,7 +421,7 @@ export default function MetricForm({ accountId, mode, initial, submitting, error
                   value={ageDrafts[range] ?? ''}
                   onChange={(e) => setAgeDrafts((d) => ({ ...d, [range]: e.target.value }))}
                 />
-                <span className="field-percent">{ageDrafts[range] ? formatPercent(percentage(count, ageTotal)) : ''}</span>
+                <span className="field-percent">{ageDrafts[range] ? formatPercentBR(percentage(count, ageTotal)) : ''}</span>
               </label>
             )
           })}
@@ -384,7 +444,7 @@ export default function MetricForm({ accountId, mode, initial, submitting, error
                   value={genderDrafts[gender] ?? ''}
                   onChange={(e) => setGenderDrafts((d) => ({ ...d, [gender]: e.target.value }))}
                 />
-                <span className="field-percent">{genderDrafts[gender] ? formatPercent(percentage(count, genderTotal)) : ''}</span>
+                <span className="field-percent">{genderDrafts[gender] ? formatPercentBR(percentage(count, genderTotal)) : ''}</span>
               </label>
             )
           })}
@@ -408,6 +468,22 @@ export default function MetricForm({ accountId, mode, initial, submitting, error
           <button type="button" onClick={onCancel} disabled={submitting}>
             Cancelar
           </button>
+        )}
+        {onDelete && !confirmingDelete && (
+          <button type="button" className="danger" onClick={() => setConfirmingDelete(true)} disabled={submitting || deleting}>
+            Excluir registro
+          </button>
+        )}
+        {onDelete && confirmingDelete && (
+          <span className="confirm-delete">
+            Confirma excluir este registro?
+            <button type="button" className="danger" onClick={onDelete} disabled={deleting}>
+              {deleting ? 'Excluindo...' : 'Sim, excluir'}
+            </button>
+            <button type="button" onClick={() => setConfirmingDelete(false)} disabled={deleting}>
+              Não
+            </button>
+          </span>
         )}
       </div>
     </form>

@@ -21,11 +21,18 @@ const OPTIONAL_METRIC_INT_FIELDS = [
   "views_from_followers",
   "views_from_non_followers",
   "viewers_total",
-  "views_stories",
-  "views_posts",
-  "views_reels",
+  "views_stories_followers",
+  "views_stories_non_followers",
+  "views_posts_followers",
+  "views_posts_non_followers",
+  "views_reels_followers",
+  "views_reels_non_followers",
   "interactions_from_followers",
   "interactions_from_non_followers",
+  "interactions_stories_followers",
+  "interactions_stories_non_followers",
+  "interactions_posts_followers",
+  "interactions_posts_non_followers",
   "replies",
   "shares",
   "likes",
@@ -36,8 +43,12 @@ type OptionalMetricIntField = (typeof OPTIONAL_METRIC_INT_FIELDS)[number];
 const METRIC_COLUMNS = `
   id, account_id, date::text as date, followers, reach, interactions, profile_visits, posts_published, note, created_at,
   views_total, views_from_followers, views_from_non_followers, viewers_total,
-  views_stories, views_posts, views_reels,
+  views_stories_followers, views_stories_non_followers,
+  views_posts_followers, views_posts_non_followers,
+  views_reels_followers, views_reels_non_followers,
   interactions_from_followers, interactions_from_non_followers,
+  interactions_stories_followers, interactions_stories_non_followers,
+  interactions_posts_followers, interactions_posts_non_followers,
   replies, shares, likes, comments
 `;
 
@@ -56,11 +67,18 @@ interface DailyMetricRow {
   views_from_followers: number | null;
   views_from_non_followers: number | null;
   viewers_total: number | null;
-  views_stories: number | null;
-  views_posts: number | null;
-  views_reels: number | null;
+  views_stories_followers: number | null;
+  views_stories_non_followers: number | null;
+  views_posts_followers: number | null;
+  views_posts_non_followers: number | null;
+  views_reels_followers: number | null;
+  views_reels_non_followers: number | null;
   interactions_from_followers: number | null;
   interactions_from_non_followers: number | null;
+  interactions_stories_followers: number | null;
+  interactions_stories_non_followers: number | null;
+  interactions_posts_followers: number | null;
+  interactions_posts_non_followers: number | null;
   replies: number | null;
   shares: number | null;
   likes: number | null;
@@ -398,15 +416,23 @@ async function handlePost(request: Request, sql: ReturnType<typeof neon>): Promi
         insert into daily_metrics
           (id, account_id, date, followers, reach, interactions, profile_visits, posts_published, note,
            views_total, views_from_followers, views_from_non_followers, viewers_total,
-           views_stories, views_posts, views_reels,
+           views_stories_followers, views_stories_non_followers,
+           views_posts_followers, views_posts_non_followers,
+           views_reels_followers, views_reels_non_followers,
            interactions_from_followers, interactions_from_non_followers,
+           interactions_stories_followers, interactions_stories_non_followers,
+           interactions_posts_followers, interactions_posts_non_followers,
            replies, shares, likes, comments)
         values
           (${newId}, ${accountId}, ${date}, ${followers.value}, ${o.reach}, ${o.interactions},
            ${o.profile_visits}, ${o.posts_published}, ${note.value},
            ${o.views_total}, ${o.views_from_followers}, ${o.views_from_non_followers}, ${o.viewers_total},
-           ${o.views_stories}, ${o.views_posts}, ${o.views_reels},
+           ${o.views_stories_followers}, ${o.views_stories_non_followers},
+           ${o.views_posts_followers}, ${o.views_posts_non_followers},
+           ${o.views_reels_followers}, ${o.views_reels_non_followers},
            ${o.interactions_from_followers}, ${o.interactions_from_non_followers},
+           ${o.interactions_stories_followers}, ${o.interactions_stories_non_followers},
+           ${o.interactions_posts_followers}, ${o.interactions_posts_non_followers},
            ${o.replies}, ${o.shares}, ${o.likes}, ${o.comments})
         returning ${sql.unsafe(METRIC_COLUMNS)}
       `,
@@ -555,11 +581,18 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
           views_from_followers = ${m.views_from_followers},
           views_from_non_followers = ${m.views_from_non_followers},
           viewers_total = ${m.viewers_total},
-          views_stories = ${m.views_stories},
-          views_posts = ${m.views_posts},
-          views_reels = ${m.views_reels},
+          views_stories_followers = ${m.views_stories_followers},
+          views_stories_non_followers = ${m.views_stories_non_followers},
+          views_posts_followers = ${m.views_posts_followers},
+          views_posts_non_followers = ${m.views_posts_non_followers},
+          views_reels_followers = ${m.views_reels_followers},
+          views_reels_non_followers = ${m.views_reels_non_followers},
           interactions_from_followers = ${m.interactions_from_followers},
           interactions_from_non_followers = ${m.interactions_from_non_followers},
+          interactions_stories_followers = ${m.interactions_stories_followers},
+          interactions_stories_non_followers = ${m.interactions_stories_non_followers},
+          interactions_posts_followers = ${m.interactions_posts_followers},
+          interactions_posts_non_followers = ${m.interactions_posts_non_followers},
           replies = ${m.replies},
           shares = ${m.shares},
           likes = ${m.likes},
@@ -603,6 +636,25 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
   }
 }
 
+async function handleDelete(request: Request, sql: ReturnType<typeof neon>): Promise<Response> {
+  const url = new URL(request.url);
+  const id = url.searchParams.get("id");
+  if (!id || !UUID_RE.test(id)) {
+    return errorResponse("Parâmetro obrigatório ausente ou inválido: id.", 400);
+  }
+
+  try {
+    const deleted = await sql`delete from daily_metrics where id = ${id} returning id`;
+    if (deleted.length === 0) {
+      return errorResponse("Registro de métricas não encontrado.", 404);
+    }
+    return json({ deleted_id: id }, 200);
+  } catch (err) {
+    console.error("Erro ao excluir daily_metrics:", err);
+    return errorResponse("Erro ao excluir registro de métricas.", 500);
+  }
+}
+
 export default {
   async fetch(request: Request): Promise<Response> {
     const databaseUrl = process.env.DATABASE_URL;
@@ -618,10 +670,12 @@ export default {
         return handlePost(request, sql);
       case "PATCH":
         return handlePatch(request, sql);
+      case "DELETE":
+        return handleDelete(request, sql);
       default:
         return new Response(JSON.stringify({ error: "Método não permitido." }), {
           status: 405,
-          headers: { "content-type": "application/json", allow: "GET, POST, PATCH" },
+          headers: { "content-type": "application/json", allow: "GET, POST, PATCH, DELETE" },
         });
     }
   },

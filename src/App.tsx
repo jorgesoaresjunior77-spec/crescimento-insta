@@ -3,8 +3,10 @@ import './App.css'
 import {
   ApiError,
   createMetric,
+  deleteMetric,
   fetchAccounts,
   fetchMetrics,
+  updateAccountGoal,
   updateMetric,
   type Account,
   type DailyMetric,
@@ -13,7 +15,6 @@ import {
 import {
   PERIOD_PRESET_LABELS,
   type PeriodPreset,
-  computeVariation,
   formatCalendarDateBR,
   formatNumber,
   periodRange,
@@ -21,6 +22,7 @@ import {
 } from './lib/metrics'
 import MetricForm from './components/MetricForm'
 import GrowthCharts from './components/GrowthCharts'
+import GoalCard from './components/GoalCard'
 
 type LoadState<T> =
   | { status: 'loading' }
@@ -28,43 +30,21 @@ type LoadState<T> =
   | { status: 'empty' }
   | { status: 'ready'; data: T }
 
-function VariationBadge({ label, variation }: { label: string; variation: ReturnType<typeof computeVariation> }) {
-  if (!variation) {
-    return (
-      <div className="stat">
-        <span className="stat-label">{label}</span>
-        <span className="stat-value">indisponível</span>
-      </div>
-    )
-  }
-  const sign = variation.absolute > 0 ? '+' : ''
-  const percentText = variation.percent === null ? '' : ` (${sign}${variation.percent.toFixed(1)}%)`
-  return (
-    <div className="stat">
-      <span className="stat-label">{label}</span>
-      <span className={`stat-value ${variation.absolute >= 0 ? 'positive' : 'negative'}`}>
-        {sign}
-        {variation.absolute.toLocaleString('pt-BR')}
-        {percentText}
-      </span>
-    </div>
-  )
-}
-
 function App() {
   const [accountsState, setAccountsState] = useState<LoadState<Account[]>>({ status: 'loading' })
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null)
   const [metricsState, setMetricsState] = useState<LoadState<DailyMetric[]>>({ status: 'loading' })
-  const [goalDraft, setGoalDraft] = useState('')
   const [accountsReload, setAccountsReload] = useState(0)
   const [metricsReload, setMetricsReload] = useState(0)
 
   const [createStatus, setCreateStatus] = useState<'idle' | 'saving'>('idle')
   const [createError, setCreateError] = useState<string | null>(null)
+  const [createFormKey, setCreateFormKey] = useState(0)
 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editStatus, setEditStatus] = useState<'idle' | 'saving'>('idle')
   const [editError, setEditError] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('30d')
   const [customFrom, setCustomFrom] = useState(todayIsoLocal())
@@ -112,10 +92,6 @@ function App() {
 
   const selectedAccount = accountsState.status === 'ready' ? (accountsState.data.find((a) => a.id === selectedAccountId) ?? null) : null
 
-  useEffect(() => {
-    setGoalDraft(selectedAccount?.follower_goal != null ? String(selectedAccount.follower_goal) : '')
-  }, [selectedAccount?.id, selectedAccount?.follower_goal])
-
   const sortedMetrics = useMemo(
     () => (metricsState.status === 'ready' ? [...metricsState.data].sort((a, b) => a.date.localeCompare(b.date)) : []),
     [metricsState],
@@ -127,29 +103,13 @@ function App() {
     [sortedMetrics, range],
   )
 
-  const latestMetric = sortedMetrics.length > 0 ? sortedMetrics[sortedMetrics.length - 1] : null
-
-  const followerVariation = useMemo(() => {
-    if (filteredMetrics.length === 0) return null
-    const lastInRange = filteredMetrics[filteredMetrics.length - 1]
-    const idxInFull = sortedMetrics.findIndex((m) => m.id === lastInRange.id)
-    const previous = idxInFull > 0 ? sortedMetrics[idxInFull - 1].followers : null
-    return computeVariation(lastInRange.followers, previous)
-  }, [filteredMetrics, sortedMetrics])
-
-  const periodVariation = useMemo(() => {
-    if (filteredMetrics.length < 2) return null
-    const first = filteredMetrics[0]
-    const last = filteredMetrics[filteredMetrics.length - 1]
-    return computeVariation(last.followers, first.followers)
-  }, [filteredMetrics])
-
   function handleCreateSubmit(input: NewMetricInput) {
     setCreateStatus('saving')
     setCreateError(null)
     createMetric(input)
       .then(() => {
         setMetricsReload((n) => n + 1)
+        setCreateFormKey((n) => n + 1)
       })
       .catch((err: unknown) => {
         setCreateError(err instanceof ApiError ? err.message : 'Erro desconhecido ao salvar.')
@@ -163,20 +123,27 @@ function App() {
     updateMetric(id, {
       date: input.date,
       followers: input.followers,
+      posts_published: input.posts_published,
+      note: input.note,
       reach: input.reach,
       interactions: input.interactions,
       profile_visits: input.profile_visits,
-      posts_published: input.posts_published,
-      note: input.note,
       views_total: input.views_total,
       views_from_followers: input.views_from_followers,
       views_from_non_followers: input.views_from_non_followers,
       viewers_total: input.viewers_total,
-      views_stories: input.views_stories,
-      views_posts: input.views_posts,
-      views_reels: input.views_reels,
+      views_stories_followers: input.views_stories_followers,
+      views_stories_non_followers: input.views_stories_non_followers,
+      views_posts_followers: input.views_posts_followers,
+      views_posts_non_followers: input.views_posts_non_followers,
+      views_reels_followers: input.views_reels_followers,
+      views_reels_non_followers: input.views_reels_non_followers,
       interactions_from_followers: input.interactions_from_followers,
       interactions_from_non_followers: input.interactions_from_non_followers,
+      interactions_stories_followers: input.interactions_stories_followers,
+      interactions_stories_non_followers: input.interactions_stories_non_followers,
+      interactions_posts_followers: input.interactions_posts_followers,
+      interactions_posts_non_followers: input.interactions_posts_non_followers,
       replies: input.replies,
       shares: input.shares,
       likes: input.likes,
@@ -193,17 +160,36 @@ function App() {
       .finally(() => setEditStatus('idle'))
   }
 
+  function handleDelete(id: string) {
+    setDeletingId(id)
+    setEditError(null)
+    deleteMetric(id)
+      .then(() => {
+        setEditingId(null)
+        setMetricsReload((n) => n + 1)
+      })
+      .catch((err: unknown) => {
+        setEditError(err instanceof ApiError ? err.message : 'Erro desconhecido ao excluir.')
+      })
+      .finally(() => setDeletingId(null))
+  }
+
+  async function handleGoalSave(goal: number | null) {
+    if (!selectedAccount) return
+    await updateAccountGoal(selectedAccount.id, goal)
+    setAccountsReload((n) => n + 1)
+  }
+
   return (
     <div className="dashboard">
       <header className="dashboard-header">
-        <h1>Crescimento Insta</h1>
-        <p>Instagram Growth Intelligence — @marlucebfernandes</p>
+        <h1>Instagram Growth Inteligência</h1>
       </header>
 
-      {accountsState.status === 'loading' && <p className="state-message">Carregando contas...</p>}
+      {accountsState.status === 'loading' && <p className="state-message">Carregando...</p>}
       {accountsState.status === 'error' && (
         <div className="state-message state-error">
-          <p>Erro ao carregar contas: {accountsState.message}</p>
+          <p>Erro ao carregar dados: {accountsState.message}</p>
           <button type="button" onClick={() => setAccountsReload((n) => n + 1)}>
             Tentar novamente
           </button>
@@ -212,26 +198,7 @@ function App() {
       {accountsState.status === 'empty' && <p className="state-message">Nenhuma conta cadastrada.</p>}
 
       {selectedAccount && (
-        <section className="account-card">
-          <div className="account-identity">
-            <h2>{selectedAccount.name}</h2>
-            <span className="account-since">Conta desde {formatCalendarDateBR(selectedAccount.created_at)}</span>
-          </div>
-
-          <div className="account-stats">
-            <div className="stat">
-              <span className="stat-label">Seguidores atuais</span>
-              <span className="stat-value">{latestMetric ? formatNumber(latestMetric.followers) : 'indisponível'}</span>
-            </div>
-            <div className="stat">
-              <span className="stat-label">Meta de seguidores</span>
-              <input type="number" className="goal-input" min={0} value={goalDraft} onChange={(e) => setGoalDraft(e.target.value)} placeholder="indisponível" />
-              <span className="stat-hint">Edição apenas visual — ainda não é salva.</span>
-            </div>
-            <VariationBadge label="Variação (último registro)" variation={followerVariation} />
-            <VariationBadge label={`Variação no período (${PERIOD_PRESET_LABELS[periodPreset]})`} variation={periodVariation} />
-          </div>
-        </section>
+        <GoalCard account={selectedAccount} sortedMetrics={sortedMetrics} onSave={handleGoalSave} />
       )}
 
       {selectedAccount && (
@@ -267,7 +234,14 @@ function App() {
       {selectedAccount && (
         <section className="add-metric">
           <h2>Adicionar registro</h2>
-          <MetricForm accountId={selectedAccount.id} mode="create" submitting={createStatus === 'saving'} error={createError} onSubmit={handleCreateSubmit} />
+          <MetricForm
+            key={createFormKey}
+            accountId={selectedAccount.id}
+            mode="create"
+            submitting={createStatus === 'saving'}
+            error={createError}
+            onSubmit={handleCreateSubmit}
+          />
         </section>
       )}
 
@@ -283,7 +257,7 @@ function App() {
             </button>
           </div>
         )}
-        {metricsState.status === 'empty' && <p className="state-message">Nenhum histórico de métricas disponível para esta conta.</p>}
+        {metricsState.status === 'empty' && <p className="state-message">Nenhum registro cadastrado ainda. Use o formulário acima para começar.</p>}
 
         {metricsState.status === 'ready' && filteredMetrics.length === 0 && (
           <p className="state-message">Nenhum registro no período selecionado.</p>
@@ -320,6 +294,8 @@ function App() {
                             setEditingId(null)
                             setEditError(null)
                           }}
+                          onDelete={() => handleDelete(m.id)}
+                          deleting={deletingId === m.id}
                         />
                       </td>
                     </tr>

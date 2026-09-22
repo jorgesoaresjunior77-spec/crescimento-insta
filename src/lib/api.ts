@@ -47,11 +47,18 @@ export interface DailyMetric {
   views_from_followers: number | null
   views_from_non_followers: number | null
   viewers_total: number | null
-  views_stories: number | null
-  views_posts: number | null
-  views_reels: number | null
+  views_stories_followers: number | null
+  views_stories_non_followers: number | null
+  views_posts_followers: number | null
+  views_posts_non_followers: number | null
+  views_reels_followers: number | null
+  views_reels_non_followers: number | null
   interactions_from_followers: number | null
   interactions_from_non_followers: number | null
+  interactions_stories_followers: number | null
+  interactions_stories_non_followers: number | null
+  interactions_posts_followers: number | null
+  interactions_posts_non_followers: number | null
   replies: number | null
   shares: number | null
   likes: number | null
@@ -89,20 +96,27 @@ export interface NewMetricInput {
   account_id: string
   date: string
   followers: number
-  reach: number | null
-  interactions: number | null
-  profile_visits: number | null
-  posts_published: number | null
-  note: string | null
+  reach?: number | null
+  interactions?: number | null
+  profile_visits?: number | null
+  posts_published?: number | null
+  note?: string | null
   views_total?: number | null
   views_from_followers?: number | null
   views_from_non_followers?: number | null
   viewers_total?: number | null
-  views_stories?: number | null
-  views_posts?: number | null
-  views_reels?: number | null
+  views_stories_followers?: number | null
+  views_stories_non_followers?: number | null
+  views_posts_followers?: number | null
+  views_posts_non_followers?: number | null
+  views_reels_followers?: number | null
+  views_reels_non_followers?: number | null
   interactions_from_followers?: number | null
   interactions_from_non_followers?: number | null
+  interactions_stories_followers?: number | null
+  interactions_stories_non_followers?: number | null
+  interactions_posts_followers?: number | null
+  interactions_posts_non_followers?: number | null
   replies?: number | null
   shares?: number | null
   likes?: number | null
@@ -124,11 +138,18 @@ export type MetricPatchInput = Partial<
     | 'views_from_followers'
     | 'views_from_non_followers'
     | 'viewers_total'
-    | 'views_stories'
-    | 'views_posts'
-    | 'views_reels'
+    | 'views_stories_followers'
+    | 'views_stories_non_followers'
+    | 'views_posts_followers'
+    | 'views_posts_non_followers'
+    | 'views_reels_followers'
+    | 'views_reels_non_followers'
     | 'interactions_from_followers'
     | 'interactions_from_non_followers'
+    | 'interactions_stories_followers'
+    | 'interactions_stories_non_followers'
+    | 'interactions_posts_followers'
+    | 'interactions_posts_non_followers'
     | 'replies'
     | 'shares'
     | 'likes'
@@ -144,6 +165,19 @@ export async function fetchAccounts(): Promise<Account[]> {
   }
   const body = (await res.json()) as { accounts: Account[] }
   return body.accounts
+}
+
+export async function updateAccountGoal(id: string, followerGoal: number | null): Promise<Account> {
+  const res = await fetch('/api/accounts', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id, follower_goal: followerGoal }),
+  })
+  if (!res.ok) {
+    throw await parseError(res)
+  }
+  const body = (await res.json()) as { account: Account }
+  return body.account
 }
 
 export async function fetchMetrics(accountId: string): Promise<DailyMetric[]> {
@@ -179,4 +213,11 @@ export async function updateMetric(id: string, patch: MetricPatchInput): Promise
   }
   const body = (await res.json()) as { metric: DailyMetric }
   return body.metric
+}
+
+export async function deleteMetric(id: string): Promise<void> {
+  const res = await fetch(`/api/metrics?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+  if (!res.ok) {
+    throw await parseError(res)
+  }
 }

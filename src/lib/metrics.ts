@@ -1,3 +1,5 @@
+import type { DailyMetric } from './api'
+
 export const AGE_RANGES = ['13-17', '18-24', '25-34', '35-44', '45-54', '55-64', '65+'] as const
 export type AgeRange = (typeof AGE_RANGES)[number]
 
@@ -15,12 +17,19 @@ export function percentage(part: number, total: number): number | null {
   return (part / total) * 100
 }
 
-export function formatPercent(value: number | null): string {
-  return value === null ? 'indisponível' : `${value.toFixed(1)}%`
+/** Porcentagem no padrão brasileiro: vírgula decimal, sem separador de milhar, símbolo %. */
+export function formatPercentBR(value: number | null): string {
+  if (value === null) return 'indisponível'
+  const text = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 }).format(value)
+  return `${text}%`
 }
 
+/** Alias mantido para compatibilidade com chamadas existentes. */
+export const formatPercent = formatPercentBR
+
+/** Quantidade no padrão brasileiro: ponto como separador de milhares, sem casas decimais. */
 export function formatNumber(value: number | null): string {
-  return value === null ? 'indisponível' : value.toLocaleString('pt-BR')
+  return value === null ? 'indisponível' : new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 }).format(value)
 }
 
 export interface Variation {
@@ -58,6 +67,14 @@ export function addDaysToIsoDate(iso: string, deltaDays: number): string {
   return date.toISOString().slice(0, 10)
 }
 
+/** Diferença em dias corridos entre duas datas YYYY-MM-DD (b - a), em aritmética UTC pura. */
+export function daysBetweenIsoDates(a: string, b: string): number {
+  const [ay, am, ad] = a.split('-').map(Number)
+  const [by, bm, bd] = b.split('-').map(Number)
+  const msPerDay = 24 * 60 * 60 * 1000
+  return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / msPerDay)
+}
+
 export type PeriodPreset = 'today' | '7d' | '30d' | 'custom'
 
 export const PERIOD_PRESET_LABELS: Record<PeriodPreset, string> = {
@@ -65,6 +82,17 @@ export const PERIOD_PRESET_LABELS: Record<PeriodPreset, string> = {
   '7d': 'Últimos 7 dias',
   '30d': 'Últimos 30 dias',
   custom: 'Personalizado',
+}
+
+export function periodRange(
+  preset: PeriodPreset,
+  customFrom: string,
+  customTo: string,
+): { from: string; to: string } {
+  if (preset === 'custom') return { from: customFrom, to: customTo }
+  const today = todayIsoLocal()
+  const daysBack = preset === 'today' ? 0 : preset === '7d' ? 6 : 29
+  return { from: addDaysToIsoDate(today, -daysBack), to: today }
 }
 
 /** '' -> null (campo não informado); string numérica -> número; qualquer outra coisa -> 'invalid' */
@@ -81,13 +109,39 @@ export function parseRequiredInt(raw: string): number | 'invalid' {
   return Number.isInteger(n) && n >= 0 ? n : 'invalid'
 }
 
-export function periodRange(
-  preset: PeriodPreset,
-  customFrom: string,
-  customTo: string,
-): { from: string; to: string } {
-  if (preset === 'custom') return { from: customFrom, to: customTo }
-  const today = todayIsoLocal()
-  const daysBack = preset === 'today' ? 0 : preset === '7d' ? 6 : 29
-  return { from: addDaysToIsoDate(today, -daysBack), to: today }
+export interface GoalEstimate {
+  status: 'reached' | 'unavailable' | 'estimated'
+  daysRemaining?: number
+  dailyAverageGrowth?: number
+}
+
+/**
+ * Estima quantos dias faltam para atingir a meta, com base na média diária de
+ * crescimento de seguidores observada no histórico (primeiro vs. último registro).
+ * Nunca inventa um número quando não há dados suficientes.
+ */
+export function estimateGoalCompletion(
+  sortedMetrics: DailyMetric[],
+  currentFollowers: number,
+  goal: number,
+): GoalEstimate {
+  if (currentFollowers >= goal) {
+    return { status: 'reached' }
+  }
+  if (sortedMetrics.length < 2) {
+    return { status: 'unavailable' }
+  }
+  const first = sortedMetrics[0]
+  const last = sortedMetrics[sortedMetrics.length - 1]
+  const days = daysBetweenIsoDates(first.date, last.date)
+  if (days <= 0) {
+    return { status: 'unavailable' }
+  }
+  const dailyAverageGrowth = (last.followers - first.followers) / days
+  if (dailyAverageGrowth <= 0) {
+    return { status: 'unavailable' }
+  }
+  const remaining = goal - currentFollowers
+  const daysRemaining = Math.ceil(remaining / dailyAverageGrowth)
+  return { status: 'estimated', daysRemaining, dailyAverageGrowth }
 }

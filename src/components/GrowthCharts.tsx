@@ -35,15 +35,20 @@ function ChartCard({ title, empty, children }: { title: string; empty: boolean; 
   )
 }
 
+function sumOrNull(a: number | null, b: number | null): number | null {
+  if (a === null && b === null) return null
+  return (a ?? 0) + (b ?? 0)
+}
+
 export default function GrowthCharts({ metrics }: { metrics: DailyMetric[] }) {
   const series = metrics.map((m) => ({
     date: formatCalendarDateBR(m.date),
     followers: m.followers,
     views_total: m.views_total,
     interactions: m.interactions,
-    views_stories: m.views_stories,
-    views_posts: m.views_posts,
-    views_reels: m.views_reels,
+    views_stories: sumOrNull(m.views_stories_followers, m.views_stories_non_followers),
+    views_posts: sumOrNull(m.views_posts_followers, m.views_posts_non_followers),
+    views_reels: sumOrNull(m.views_reels_followers, m.views_reels_non_followers),
   }))
 
   const latestGenders = findLatestWithAudience(metrics, (m) => m.audience.genders)

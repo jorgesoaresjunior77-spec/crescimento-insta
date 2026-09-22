@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { neon } from "@neondatabase/serverless";
 
 export const config = {
@@ -8,8 +9,37 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-const METRIC_COLUMNS =
-  "id, account_id, date::text as date, followers, reach, interactions, profile_visits, posts_published, note, created_at";
+const AGE_RANGES = ["13-17", "18-24", "25-34", "35-44", "45-54", "55-64", "65+"] as const;
+const GENDERS = ["female", "male", "other"] as const;
+
+const OPTIONAL_METRIC_INT_FIELDS = [
+  "reach",
+  "interactions",
+  "profile_visits",
+  "posts_published",
+  "views_total",
+  "views_from_followers",
+  "views_from_non_followers",
+  "viewers_total",
+  "views_stories",
+  "views_posts",
+  "views_reels",
+  "interactions_from_followers",
+  "interactions_from_non_followers",
+  "replies",
+  "shares",
+  "likes",
+  "comments",
+] as const;
+type OptionalMetricIntField = (typeof OPTIONAL_METRIC_INT_FIELDS)[number];
+
+const METRIC_COLUMNS = `
+  id, account_id, date::text as date, followers, reach, interactions, profile_visits, posts_published, note, created_at,
+  views_total, views_from_followers, views_from_non_followers, viewers_total,
+  views_stories, views_posts, views_reels,
+  interactions_from_followers, interactions_from_non_followers,
+  replies, shares, likes, comments
+`;
 
 interface DailyMetricRow {
   id: string;
@@ -22,6 +52,37 @@ interface DailyMetricRow {
   posts_published: number | null;
   note: string | null;
   created_at: string;
+  views_total: number | null;
+  views_from_followers: number | null;
+  views_from_non_followers: number | null;
+  viewers_total: number | null;
+  views_stories: number | null;
+  views_posts: number | null;
+  views_reels: number | null;
+  interactions_from_followers: number | null;
+  interactions_from_non_followers: number | null;
+  replies: number | null;
+  shares: number | null;
+  likes: number | null;
+  comments: number | null;
+}
+
+interface AudienceLocationRow {
+  city: string;
+  followers_count: number;
+}
+interface AudienceAgeRangeRow {
+  age_range: string;
+  followers_count: number;
+}
+interface AudienceGenderRow {
+  gender: string;
+  followers_count: number;
+}
+interface Audience {
+  locations: AudienceLocationRow[];
+  age_ranges: AudienceAgeRangeRow[];
+  genders: AudienceGenderRow[];
 }
 
 function json(body: unknown, status: number): Response {
@@ -91,6 +152,121 @@ async function parseJsonBody(request: Request): Promise<{ ok: true; body: Record
   return { ok: true, body: raw as Record<string, unknown> };
 }
 
+type AudienceResult =
+  | { ok: true; value: Audience }
+  | { ok: false; error: string };
+
+function validateAudienceLocations(raw: unknown): { ok: true; value: AudienceLocationRow[] } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: [] };
+  if (!Array.isArray(raw)) return { ok: false, error: "audience.locations deve ser uma lista." };
+  const seen = new Set<string>();
+  const out: AudienceLocationRow[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) {
+      return { ok: false, error: "Cada item de audience.locations deve ser um objeto." };
+    }
+    const record = item as Record<string, unknown>;
+    const city = record.city;
+    if (typeof city !== "string" || city.trim() === "") {
+      return { ok: false, error: "audience.locations: 'city' é obrigatório." };
+    }
+    const trimmedCity = city.trim();
+    const count = validateNonNegInt(record.followers_count, `audience.locations (${trimmedCity}) followers_count`, true);
+    if (!count.ok) return { ok: false, error: count.error };
+    const key = trimmedCity.toLowerCase();
+    if (seen.has(key)) {
+      return { ok: false, error: `Cidade duplicada em audience.locations: ${trimmedCity}.` };
+    }
+    seen.add(key);
+    out.push({ city: trimmedCity, followers_count: count.value as number });
+  }
+  return { ok: true, value: out };
+}
+
+function validateAudienceAgeRanges(raw: unknown): { ok: true; value: AudienceAgeRangeRow[] } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: [] };
+  if (!Array.isArray(raw)) return { ok: false, error: "audience.age_ranges deve ser uma lista." };
+  const seen = new Set<string>();
+  const out: AudienceAgeRangeRow[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) {
+      return { ok: false, error: "Cada item de audience.age_ranges deve ser um objeto." };
+    }
+    const record = item as Record<string, unknown>;
+    const ageRange = record.age_range;
+    if (typeof ageRange !== "string" || !(AGE_RANGES as readonly string[]).includes(ageRange)) {
+      return { ok: false, error: `audience.age_ranges: 'age_range' deve ser uma de: ${AGE_RANGES.join(", ")}.` };
+    }
+    const count = validateNonNegInt(record.followers_count, `audience.age_ranges (${ageRange}) followers_count`, true);
+    if (!count.ok) return { ok: false, error: count.error };
+    if (seen.has(ageRange)) {
+      return { ok: false, error: `Faixa etária duplicada em audience.age_ranges: ${ageRange}.` };
+    }
+    seen.add(ageRange);
+    out.push({ age_range: ageRange, followers_count: count.value as number });
+  }
+  return { ok: true, value: out };
+}
+
+function validateAudienceGenders(raw: unknown): { ok: true; value: AudienceGenderRow[] } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: [] };
+  if (!Array.isArray(raw)) return { ok: false, error: "audience.genders deve ser uma lista." };
+  const seen = new Set<string>();
+  const out: AudienceGenderRow[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) {
+      return { ok: false, error: "Cada item de audience.genders deve ser um objeto." };
+    }
+    const record = item as Record<string, unknown>;
+    const gender = record.gender;
+    if (typeof gender !== "string" || !(GENDERS as readonly string[]).includes(gender)) {
+      return { ok: false, error: `audience.genders: 'gender' deve ser um de: ${GENDERS.join(", ")}.` };
+    }
+    const count = validateNonNegInt(record.followers_count, `audience.genders (${gender}) followers_count`, true);
+    if (!count.ok) return { ok: false, error: count.error };
+    if (seen.has(gender)) {
+      return { ok: false, error: `Gênero duplicado em audience.genders: ${gender}.` };
+    }
+    seen.add(gender);
+    out.push({ gender, followers_count: count.value as number });
+  }
+  return { ok: true, value: out };
+}
+
+function validateAudience(raw: unknown): AudienceResult {
+  if (raw === undefined || raw === null) {
+    return { ok: true, value: { locations: [], age_ranges: [], genders: [] } };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, error: "audience deve ser um objeto com locations/age_ranges/genders." };
+  }
+  const obj = raw as Record<string, unknown>;
+  const locations = validateAudienceLocations(obj.locations);
+  if (!locations.ok) return locations;
+  const ageRanges = validateAudienceAgeRanges(obj.age_ranges);
+  if (!ageRanges.ok) return ageRanges;
+  const genders = validateAudienceGenders(obj.genders);
+  if (!genders.ok) return genders;
+  return { ok: true, value: { locations: locations.value, age_ranges: ageRanges.value, genders: genders.value } };
+}
+
+function emptyAudience(): Audience {
+  return { locations: [], age_ranges: [], genders: [] };
+}
+
+async function fetchAudienceForId(sql: ReturnType<typeof neon>, dailyMetricId: string): Promise<Audience> {
+  const [locationRows, ageRangeRows, genderRows] = await Promise.all([
+    sql`select city, followers_count from audience_locations where daily_metric_id = ${dailyMetricId}`,
+    sql`select age_range, followers_count from audience_age_ranges where daily_metric_id = ${dailyMetricId}`,
+    sql`select gender, followers_count from audience_genders where daily_metric_id = ${dailyMetricId}`,
+  ]);
+  return {
+    locations: locationRows as AudienceLocationRow[],
+    age_ranges: ageRangeRows as AudienceAgeRangeRow[],
+    genders: genderRows as AudienceGenderRow[],
+  };
+}
+
 async function handleGet(request: Request, sql: ReturnType<typeof neon>): Promise<Response> {
   const url = new URL(request.url);
   const accountId = url.searchParams.get("account_id");
@@ -111,15 +287,55 @@ async function handleGet(request: Request, sql: ReturnType<typeof neon>): Promis
   }
 
   try {
-    const metrics = await sql`
+    const metrics = (await sql`
       select ${sql.unsafe(METRIC_COLUMNS)}
       from daily_metrics
       where account_id = ${accountId}
         and (${from}::date is null or date >= ${from}::date)
         and (${to}::date is null or date <= ${to}::date)
       order by date asc
-    `;
-    return json({ metrics }, 200);
+    `) as DailyMetricRow[];
+
+    const [locationRows, ageRangeRows, genderRows] = await Promise.all([
+      sql`
+        select al.daily_metric_id, al.city, al.followers_count
+        from audience_locations al
+        join daily_metrics dm on dm.id = al.daily_metric_id
+        where dm.account_id = ${accountId}
+          and (${from}::date is null or dm.date >= ${from}::date)
+          and (${to}::date is null or dm.date <= ${to}::date)
+      `,
+      sql`
+        select aar.daily_metric_id, aar.age_range, aar.followers_count
+        from audience_age_ranges aar
+        join daily_metrics dm on dm.id = aar.daily_metric_id
+        where dm.account_id = ${accountId}
+          and (${from}::date is null or dm.date >= ${from}::date)
+          and (${to}::date is null or dm.date <= ${to}::date)
+      `,
+      sql`
+        select ag.daily_metric_id, ag.gender, ag.followers_count
+        from audience_genders ag
+        join daily_metrics dm on dm.id = ag.daily_metric_id
+        where dm.account_id = ${accountId}
+          and (${from}::date is null or dm.date >= ${from}::date)
+          and (${to}::date is null or dm.date <= ${to}::date)
+      `,
+    ]);
+
+    const withAudience = metrics.map((m) => ({ ...m, audience: emptyAudience() }));
+    const byId = new Map(withAudience.map((m) => [m.id, m]));
+    for (const row of locationRows as Array<{ daily_metric_id: string; city: string; followers_count: number }>) {
+      byId.get(row.daily_metric_id)?.audience.locations.push({ city: row.city, followers_count: row.followers_count });
+    }
+    for (const row of ageRangeRows as Array<{ daily_metric_id: string; age_range: string; followers_count: number }>) {
+      byId.get(row.daily_metric_id)?.audience.age_ranges.push({ age_range: row.age_range, followers_count: row.followers_count });
+    }
+    for (const row of genderRows as Array<{ daily_metric_id: string; gender: string; followers_count: number }>) {
+      byId.get(row.daily_metric_id)?.audience.genders.push({ gender: row.gender, followers_count: row.followers_count });
+    }
+
+    return json({ metrics: withAudience }, 200);
   } catch (err) {
     console.error("Erro ao consultar daily_metrics:", err);
     return errorResponse("Erro ao consultar métricas.", 500);
@@ -144,20 +360,18 @@ async function handlePost(request: Request, sql: ReturnType<typeof neon>): Promi
   const followers = validateNonNegInt(body.followers, "followers", true);
   if (!followers.ok) return errorResponse(followers.error, 400);
 
-  const reach = validateNonNegInt(body.reach, "reach", false);
-  if (!reach.ok) return errorResponse(reach.error, 400);
-
-  const interactions = validateNonNegInt(body.interactions, "interactions", false);
-  if (!interactions.ok) return errorResponse(interactions.error, 400);
-
-  const profileVisits = validateNonNegInt(body.profile_visits, "profile_visits", false);
-  if (!profileVisits.ok) return errorResponse(profileVisits.error, 400);
-
-  const postsPublished = validateNonNegInt(body.posts_published, "posts_published", false);
-  if (!postsPublished.ok) return errorResponse(postsPublished.error, 400);
+  const optionalInts = {} as Record<OptionalMetricIntField, number | null>;
+  for (const field of OPTIONAL_METRIC_INT_FIELDS) {
+    const result = validateNonNegInt(body[field], field, false);
+    if (!result.ok) return errorResponse(result.error, 400);
+    optionalInts[field] = result.value;
+  }
 
   const note = validateOptionalText(body.note, "note");
   if (!note.ok) return errorResponse(note.error, 400);
+
+  const audience = validateAudience(body.audience);
+  if (!audience.ok) return errorResponse(audience.error, 400);
 
   try {
     const accountRows = await sql`select id from accounts where id = ${accountId}`;
@@ -176,15 +390,40 @@ async function handlePost(request: Request, sql: ReturnType<typeof neon>): Promi
       );
     }
 
-    const inserted = await sql`
-      insert into daily_metrics
-        (account_id, date, followers, reach, interactions, profile_visits, posts_published, note)
-      values
-        (${accountId}, ${date}, ${followers.value}, ${reach.value}, ${interactions.value},
-         ${profileVisits.value}, ${postsPublished.value}, ${note.value})
-      returning ${sql.unsafe(METRIC_COLUMNS)}
-    `;
-    return json({ metric: (inserted as DailyMetricRow[])[0] }, 201);
+    const newId = randomUUID();
+    const o = optionalInts;
+
+    const queries = [
+      sql`
+        insert into daily_metrics
+          (id, account_id, date, followers, reach, interactions, profile_visits, posts_published, note,
+           views_total, views_from_followers, views_from_non_followers, viewers_total,
+           views_stories, views_posts, views_reels,
+           interactions_from_followers, interactions_from_non_followers,
+           replies, shares, likes, comments)
+        values
+          (${newId}, ${accountId}, ${date}, ${followers.value}, ${o.reach}, ${o.interactions},
+           ${o.profile_visits}, ${o.posts_published}, ${note.value},
+           ${o.views_total}, ${o.views_from_followers}, ${o.views_from_non_followers}, ${o.viewers_total},
+           ${o.views_stories}, ${o.views_posts}, ${o.views_reels},
+           ${o.interactions_from_followers}, ${o.interactions_from_non_followers},
+           ${o.replies}, ${o.shares}, ${o.likes}, ${o.comments})
+        returning ${sql.unsafe(METRIC_COLUMNS)}
+      `,
+      ...audience.value.locations.map(
+        (loc) => sql`insert into audience_locations (daily_metric_id, city, followers_count) values (${newId}, ${loc.city}, ${loc.followers_count})`,
+      ),
+      ...audience.value.age_ranges.map(
+        (a) => sql`insert into audience_age_ranges (daily_metric_id, age_range, followers_count) values (${newId}, ${a.age_range}, ${a.followers_count})`,
+      ),
+      ...audience.value.genders.map(
+        (g) => sql`insert into audience_genders (daily_metric_id, gender, followers_count) values (${newId}, ${g.gender}, ${g.followers_count})`,
+      ),
+    ];
+
+    const results = await sql.transaction(queries);
+    const inserted = (results[0] as unknown as DailyMetricRow[])[0];
+    return json({ metric: { ...inserted, audience: audience.value } }, 201);
   } catch (err) {
     const code = pgErrorCode(err);
     if (code === "23505") {
@@ -232,18 +471,12 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
     followers = result.value as number;
   }
 
-  const optionalIntFields: Array<["reach" | "interactions" | "profile_visits" | "posts_published", string]> = [
-    ["reach", "reach"],
-    ["interactions", "interactions"],
-    ["profile_visits", "profile_visits"],
-    ["posts_published", "posts_published"],
-  ];
-  const optionalIntUpdates: Partial<Record<string, number | null>> = {};
-  for (const [key, label] of optionalIntFields) {
-    if (has(key)) {
-      const result = validateNonNegInt(body[key], label, false);
+  const optionalIntUpdates = {} as Partial<Record<OptionalMetricIntField, number | null>>;
+  for (const field of OPTIONAL_METRIC_INT_FIELDS) {
+    if (has(field)) {
+      const result = validateNonNegInt(body[field], field, false);
       if (!result.ok) return errorResponse(result.error, 400);
-      optionalIntUpdates[key] = result.value;
+      optionalIntUpdates[field] = result.value;
     }
   }
 
@@ -254,33 +487,43 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
     note = result.value;
   }
 
+  let audienceUpdate: Audience | undefined;
+  if (has("audience")) {
+    const result = validateAudience(body.audience);
+    if (!result.ok) return errorResponse(result.error, 400);
+    audienceUpdate = result.value;
+  }
+
   const hasAnyUpdate =
     date !== undefined ||
     followers !== undefined ||
     note !== undefined ||
-    Object.keys(optionalIntUpdates).length > 0;
+    Object.keys(optionalIntUpdates).length > 0 ||
+    audienceUpdate !== undefined;
   if (!hasAnyUpdate) {
     return errorResponse("Nenhum campo para atualizar foi informado.", 400);
   }
 
   try {
-    const currentRows = await sql`
+    const currentRows = (await sql`
       select ${sql.unsafe(METRIC_COLUMNS)} from daily_metrics where id = ${id}
-    `;
+    `) as DailyMetricRow[];
     if (currentRows.length === 0) {
       return errorResponse("Registro de métricas não encontrado.", 404);
     }
-    const current = (currentRows as DailyMetricRow[])[0];
+    const current = currentRows[0];
+
+    const mergedOptionalInts = {} as Record<OptionalMetricIntField, number | null>;
+    for (const field of OPTIONAL_METRIC_INT_FIELDS) {
+      mergedOptionalInts[field] = has(field) ? (optionalIntUpdates[field] ?? null) : current[field];
+    }
 
     const merged: DailyMetricRow = {
       ...current,
       date: date ?? current.date,
       followers: followers ?? current.followers,
-      reach: has("reach") ? (optionalIntUpdates.reach ?? null) : current.reach,
-      interactions: has("interactions") ? (optionalIntUpdates.interactions ?? null) : current.interactions,
-      profile_visits: has("profile_visits") ? (optionalIntUpdates.profile_visits ?? null) : current.profile_visits,
-      posts_published: has("posts_published") ? (optionalIntUpdates.posts_published ?? null) : current.posts_published,
       note: note !== undefined ? note : current.note,
+      ...mergedOptionalInts,
     };
 
     if (merged.date !== current.date) {
@@ -297,19 +540,56 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
       }
     }
 
-    const updated = await sql`
-      update daily_metrics set
-        date = ${merged.date},
-        followers = ${merged.followers},
-        reach = ${merged.reach},
-        interactions = ${merged.interactions},
-        profile_visits = ${merged.profile_visits},
-        posts_published = ${merged.posts_published},
-        note = ${merged.note}
-      where id = ${id}
-      returning ${sql.unsafe(METRIC_COLUMNS)}
-    `;
-    return json({ metric: (updated as DailyMetricRow[])[0] }, 200);
+    const m = merged;
+    const queries = [
+      sql`
+        update daily_metrics set
+          date = ${m.date},
+          followers = ${m.followers},
+          reach = ${m.reach},
+          interactions = ${m.interactions},
+          profile_visits = ${m.profile_visits},
+          posts_published = ${m.posts_published},
+          note = ${m.note},
+          views_total = ${m.views_total},
+          views_from_followers = ${m.views_from_followers},
+          views_from_non_followers = ${m.views_from_non_followers},
+          viewers_total = ${m.viewers_total},
+          views_stories = ${m.views_stories},
+          views_posts = ${m.views_posts},
+          views_reels = ${m.views_reels},
+          interactions_from_followers = ${m.interactions_from_followers},
+          interactions_from_non_followers = ${m.interactions_from_non_followers},
+          replies = ${m.replies},
+          shares = ${m.shares},
+          likes = ${m.likes},
+          comments = ${m.comments}
+        where id = ${id}
+        returning ${sql.unsafe(METRIC_COLUMNS)}
+      `,
+    ];
+
+    if (audienceUpdate) {
+      queries.push(
+        sql`delete from audience_locations where daily_metric_id = ${id}`,
+        sql`delete from audience_age_ranges where daily_metric_id = ${id}`,
+        sql`delete from audience_genders where daily_metric_id = ${id}`,
+        ...audienceUpdate.locations.map(
+          (loc) => sql`insert into audience_locations (daily_metric_id, city, followers_count) values (${id}, ${loc.city}, ${loc.followers_count})`,
+        ),
+        ...audienceUpdate.age_ranges.map(
+          (a) => sql`insert into audience_age_ranges (daily_metric_id, age_range, followers_count) values (${id}, ${a.age_range}, ${a.followers_count})`,
+        ),
+        ...audienceUpdate.genders.map(
+          (g) => sql`insert into audience_genders (daily_metric_id, gender, followers_count) values (${id}, ${g.gender}, ${g.followers_count})`,
+        ),
+      );
+    }
+
+    const results = await sql.transaction(queries);
+    const updated = (results[0] as unknown as DailyMetricRow[])[0];
+    const audienceForResponse = audienceUpdate ?? (await fetchAudienceForId(sql, id));
+    return json({ metric: { ...updated, audience: audienceForResponse } }, 200);
   } catch (err) {
     const code = pgErrorCode(err);
     if (code === "23505") {

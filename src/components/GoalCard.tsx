@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react'
 import type { Account, DailyMetric } from '../lib/api'
-import { computeVariation, estimateGoalCompletion, formatNumber, formatPercentBR, parseOptionalInt } from '../lib/metrics'
+import {
+  computeVariation,
+  estimateGoalCompletion,
+  formatIntegerInputBR,
+  formatNumber,
+  formatPercentBR,
+  parseOptionalInt,
+  stripThousandsSep,
+} from '../lib/metrics'
 
 interface GoalCardProps {
   account: Account
@@ -56,11 +64,12 @@ export default function GoalCard({ account, sortedMetrics, onSave }: GoalCardPro
         <label>
           Meta
           <input
-            type="number"
-            min={0}
-            placeholder="ex.: 10000"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            placeholder="ex.: 10.000"
+            value={formatIntegerInputBR(draft)}
+            onChange={(e) => setDraft(stripThousandsSep(e.target.value))}
           />
         </label>
         <button type="submit" disabled={saving}>
@@ -87,7 +96,7 @@ export default function GoalCard({ account, sortedMetrics, onSave }: GoalCardPro
           {lastVariation ? (
             <span className={`stat-value ${lastVariation.absolute >= 0 ? 'positive' : 'negative'}`}>
               {lastVariation.absolute > 0 ? '+' : ''}
-              {lastVariation.absolute.toLocaleString('pt-BR')}
+              {formatNumber(lastVariation.absolute)}
               {lastVariation.percent !== null ? ` (${lastVariation.absolute > 0 ? '+' : ''}${formatPercentBR(lastVariation.percent)})` : ''}
             </span>
           ) : (

@@ -1,9 +1,18 @@
 import { useState } from 'react'
 import type { DailyMetric, NewMetricInput } from '../lib/api'
-import { AGE_RANGES, GENDERS, GENDER_LABELS, parseOptionalInt, parseRequiredInt, percentage, formatPercentBR } from '../lib/metrics'
+import {
+  AGE_RANGES,
+  GENDERS,
+  GENDER_LABELS,
+  parseOptionalInt,
+  parseRequiredInt,
+  percentage,
+  formatPercentBR,
+  formatIntegerInputBR,
+  stripThousandsSep,
+} from '../lib/metrics'
 
 const OPTIONAL_INT_FIELDS = [
-  'reach',
   'interactions',
   'profile_visits',
   'views_total',
@@ -30,7 +39,6 @@ const OPTIONAL_INT_FIELDS = [
 type OptionalIntField = (typeof OPTIONAL_INT_FIELDS)[number]
 
 const FIELD_LABELS: Record<OptionalIntField, string> = {
-  reach: 'Alcance',
   interactions: 'Interações totais',
   profile_visits: 'Visitas ao perfil',
   views_total: 'Visualizações totais',
@@ -53,6 +61,31 @@ const FIELD_LABELS: Record<OptionalIntField, string> = {
   shares: 'Compartilhamentos',
   likes: 'Curtidas',
   comments: 'Comentários',
+}
+
+/** Campo de quantidade: aceita digitação com ou sem ponto de milhar e sempre exibe formatado. */
+function IntegerTextInput({
+  value,
+  onChange,
+  placeholder,
+  required,
+}: {
+  value: string
+  onChange: (digits: string) => void
+  placeholder?: string
+  required?: boolean
+}) {
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      autoComplete="off"
+      placeholder={placeholder}
+      required={required}
+      value={formatIntegerInputBR(value)}
+      onChange={(e) => onChange(stripThousandsSep(e.target.value))}
+    />
+  )
 }
 
 interface LocationDraft {
@@ -107,7 +140,9 @@ function metricToGenderDrafts(m?: DailyMetric): Record<string, string> {
 
 function metricToLocationDrafts(m?: DailyMetric): LocationDraft[] {
   if (m && m.audience.locations.length > 0) {
-    return m.audience.locations.map((l) => ({ city: l.city, count: String(l.followers_count) }))
+    return [...m.audience.locations]
+      .sort((a, b) => b.followers_count - a.followers_count)
+      .map((l) => ({ city: l.city, count: String(l.followers_count) }))
   }
   return [
     { city: 'São Paulo', count: '' },
@@ -145,6 +180,7 @@ export default function MetricForm({
   const [locationDrafts, setLocationDrafts] = useState<LocationDraft[]>(() => metricToLocationDrafts(initial))
   const [fieldError, setFieldError] = useState<string | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [confirmingRemoveLocation, setConfirmingRemoveLocation] = useState<number | null>(null)
 
   function setField(field: OptionalIntField, raw: string) {
     setValues((v) => ({ ...v, [field]: raw }))
@@ -155,6 +191,7 @@ export default function MetricForm({
   }
   function removeLocationRow(index: number) {
     setLocationDrafts((rows) => rows.filter((_, i) => i !== index))
+    setConfirmingRemoveLocation(null)
   }
   function updateLocationRow(index: number, patch: Partial<LocationDraft>) {
     setLocationDrafts((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
@@ -240,7 +277,6 @@ export default function MetricForm({
       followers,
       posts_published: postsPublished,
       note: values.note.trim() === '' ? null : values.note.trim(),
-      reach: parsedOptional.reach ?? null,
       interactions: parsedOptional.interactions ?? null,
       profile_visits: parsedOptional.profile_visits ?? null,
       views_total: parsedOptional.views_total ?? null,
@@ -271,13 +307,7 @@ export default function MetricForm({
     return (
       <label key={field}>
         {FIELD_LABELS[field]}
-        <input
-          type="number"
-          min={0}
-          placeholder="indisponível"
-          value={values[field]}
-          onChange={(e) => setField(field, e.target.value)}
-        />
+        <IntegerTextInput placeholder="indisponível" value={values[field]} onChange={(digits) => setField(field, digits)} />
       </label>
     )
   }
@@ -293,16 +323,18 @@ export default function MetricForm({
           </label>
           <label>
             Seguidores totais
-            <input type="number" min={0} required value={values.followers} onChange={(e) => setValues((v) => ({ ...v, followers: e.target.value }))} />
+            <IntegerTextInput
+              required
+              value={values.followers}
+              onChange={(digits) => setValues((v) => ({ ...v, followers: digits }))}
+            />
           </label>
           <label>
             Posts
-            <input
-              type="number"
-              min={0}
+            <IntegerTextInput
               placeholder="indisponível"
               value={values.posts_published}
-              onChange={(e) => setValues((v) => ({ ...v, posts_published: e.target.value }))}
+              onChange={(digits) => setValues((v) => ({ ...v, posts_published: digits }))}
             />
           </label>
         </div>
@@ -315,7 +347,6 @@ export default function MetricForm({
           {numberField('viewers_total')}
           {numberField('views_from_followers')}
           {numberField('views_from_non_followers')}
-          {numberField('reach')}
         </div>
 
         <h4>Por tipo de conteúdo</h4>
@@ -387,16 +418,26 @@ export default function MetricForm({
                 value={row.city}
                 onChange={(e) => updateLocationRow(i, { city: e.target.value })}
               />
-              <input
-                type="number"
-                min={0}
-                placeholder="Seguidores"
-                value={row.count}
-                onChange={(e) => updateLocationRow(i, { count: e.target.value })}
-              />
-              <button type="button" onClick={() => removeLocationRow(i)} aria-label={`Remover ${row.city || 'cidade'}`}>
-                Remover
-              </button>
+              <IntegerTextInput placeholder="Seguidores" value={row.count} onChange={(digits) => updateLocationRow(i, { count: digits })} />
+              {confirmingRemoveLocation === i ? (
+                <span className="confirm-delete">
+                  Remover?
+                  <button type="button" className="danger" onClick={() => removeLocationRow(i)}>
+                    Sim
+                  </button>
+                  <button type="button" onClick={() => setConfirmingRemoveLocation(null)}>
+                    Não
+                  </button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmingRemoveLocation(i)}
+                  aria-label={`Remover ${row.city || 'cidade'}`}
+                >
+                  Remover
+                </button>
+              )}
             </div>
           ))}
           <button type="button" onClick={addLocationRow}>
@@ -414,12 +455,10 @@ export default function MetricForm({
             return (
               <label key={range}>
                 {range}
-                <input
-                  type="number"
-                  min={0}
+                <IntegerTextInput
                   placeholder="indisponível"
                   value={ageDrafts[range] ?? ''}
-                  onChange={(e) => setAgeDrafts((d) => ({ ...d, [range]: e.target.value }))}
+                  onChange={(digits) => setAgeDrafts((d) => ({ ...d, [range]: digits }))}
                 />
                 <span className="field-percent">{ageDrafts[range] ? formatPercentBR(percentage(count, ageTotal)) : ''}</span>
               </label>
@@ -437,12 +476,10 @@ export default function MetricForm({
             return (
               <label key={gender}>
                 {GENDER_LABELS[gender]}
-                <input
-                  type="number"
-                  min={0}
+                <IntegerTextInput
                   placeholder="indisponível"
                   value={genderDrafts[gender] ?? ''}
-                  onChange={(e) => setGenderDrafts((d) => ({ ...d, [gender]: e.target.value }))}
+                  onChange={(digits) => setGenderDrafts((d) => ({ ...d, [gender]: digits }))}
                 />
                 <span className="field-percent">{genderDrafts[gender] ? formatPercentBR(percentage(count, genderTotal)) : ''}</span>
               </label>

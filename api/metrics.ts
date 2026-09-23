@@ -272,9 +272,13 @@ function emptyAudience(): Audience {
   return { locations: [], age_ranges: [], genders: [] };
 }
 
+function withSortedLocations(audience: Audience): Audience {
+  return { ...audience, locations: [...audience.locations].sort((a, b) => b.followers_count - a.followers_count) };
+}
+
 async function fetchAudienceForId(sql: ReturnType<typeof neon>, dailyMetricId: string): Promise<Audience> {
   const [locationRows, ageRangeRows, genderRows] = await Promise.all([
-    sql`select city, followers_count from audience_locations where daily_metric_id = ${dailyMetricId}`,
+    sql`select city, followers_count from audience_locations where daily_metric_id = ${dailyMetricId} order by followers_count desc`,
     sql`select age_range, followers_count from audience_age_ranges where daily_metric_id = ${dailyMetricId}`,
     sql`select gender, followers_count from audience_genders where daily_metric_id = ${dailyMetricId}`,
   ]);
@@ -322,6 +326,7 @@ async function handleGet(request: Request, sql: ReturnType<typeof neon>): Promis
         where dm.account_id = ${accountId}
           and (${from}::date is null or dm.date >= ${from}::date)
           and (${to}::date is null or dm.date <= ${to}::date)
+        order by al.followers_count desc
       `,
       sql`
         select aar.daily_metric_id, aar.age_range, aar.followers_count
@@ -449,7 +454,7 @@ async function handlePost(request: Request, sql: ReturnType<typeof neon>): Promi
 
     const results = await sql.transaction(queries);
     const inserted = (results[0] as unknown as DailyMetricRow[])[0];
-    return json({ metric: { ...inserted, audience: audience.value } }, 201);
+    return json({ metric: { ...inserted, audience: withSortedLocations(audience.value) } }, 201);
   } catch (err) {
     const code = pgErrorCode(err);
     if (code === "23505") {
@@ -621,7 +626,7 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
 
     const results = await sql.transaction(queries);
     const updated = (results[0] as unknown as DailyMetricRow[])[0];
-    const audienceForResponse = audienceUpdate ?? (await fetchAudienceForId(sql, id));
+    const audienceForResponse = withSortedLocations(audienceUpdate ?? (await fetchAudienceForId(sql, id)));
     return json({ metric: { ...updated, audience: audienceForResponse } }, 200);
   } catch (err) {
     const code = pgErrorCode(err);

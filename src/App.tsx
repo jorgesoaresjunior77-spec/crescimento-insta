@@ -125,7 +125,6 @@ function App() {
       followers: input.followers,
       posts_published: input.posts_published,
       note: input.note,
-      reach: input.reach,
       interactions: input.interactions,
       profile_visits: input.profile_visits,
       views_total: input.views_total,

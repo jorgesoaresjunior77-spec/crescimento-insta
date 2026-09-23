@@ -32,6 +32,19 @@ export function formatNumber(value: number | null): string {
   return value === null ? 'indisponível' : new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 }).format(value)
 }
 
+/** Remove tudo que não for dígito (aceita colar/digitar com ou sem separador de milhar). */
+export function stripThousandsSep(raw: string): string {
+  return raw.replace(/\D/g, '')
+}
+
+/** Formata uma string de dígitos puros com separador de milhar, para exibição em campos de quantidade. */
+export function formatIntegerInputBR(digits: string): string {
+  if (digits === '') return ''
+  const n = Number(digits)
+  if (!Number.isFinite(n)) return digits
+  return new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 }).format(n)
+}
+
 export interface Variation {
   absolute: number
   percent: number | null

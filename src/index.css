@@ -1,15 +1,39 @@
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
+  /* Instagram Growth Inteligência — identidade escura sempre ativa (não segue o tema do SO). */
+  --text: #9aa3c4;
+  --text-h: #f5f7ff;
+  --bg: #0a0d1a;
+  --bg-elevated: #10142a;
+  --card-bg: #141a34;
+  --border: #262c4a;
+  --code-bg: #171d3a;
+  --accent: #8b5cf6;
+  --accent-bg: rgba(139, 92, 246, 0.16);
+  --accent-border: rgba(139, 92, 246, 0.5);
+  --social-bg: rgba(38, 44, 74, 0.5);
   --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+    rgba(0, 0, 0, 0.55) 0 10px 30px -8px, rgba(0, 0, 0, 0.35) 0 4px 10px -4px;
+
+  /* Paleta viva sobre fundo escuro — inspirada nas referências, sem copiar nenhuma. */
+  --grad-blue-from: #2563eb;
+  --grad-blue-to: #22d3ee;
+  --grad-purple-from: #7c3aed;
+  --grad-purple-to: #ec4899;
+  --grad-pink-from: #ec4899;
+  --grad-pink-to: #f97316;
+  --grad-orange-from: #f97316;
+  --grad-orange-to: #facc15;
+  --grad-teal-from: #14b8a6;
+  --grad-teal-to: #22d3ee;
+  --grad-violet-from: #8b5cf6;
+  --grad-violet-to: #3b82f6;
+
+  --gradient-blue: linear-gradient(135deg, var(--grad-blue-from), var(--grad-blue-to));
+  --gradient-purple: linear-gradient(135deg, var(--grad-purple-from), var(--grad-purple-to));
+  --gradient-pink: linear-gradient(135deg, var(--grad-pink-from), var(--grad-pink-to));
+  --gradient-orange: linear-gradient(135deg, var(--grad-orange-from), var(--grad-orange-to));
+  --gradient-teal: linear-gradient(135deg, var(--grad-teal-from), var(--grad-teal-to));
+  --gradient-violet: linear-gradient(135deg, var(--grad-violet-from), var(--grad-violet-to));
 
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
   --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
@@ -17,7 +41,7 @@
 
   font: 18px/145% var(--sans);
   letter-spacing: 0.18px;
-  color-scheme: light dark;
+  color-scheme: dark;
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
@@ -27,26 +51,6 @@
 
   @media (max-width: 1024px) {
     font-size: 16px;
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
   }
 }
 

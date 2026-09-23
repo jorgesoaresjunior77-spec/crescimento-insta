@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { DailyMetric, NewMetricInput } from '../lib/api'
 import {
   AGE_RANGES,
@@ -10,6 +10,9 @@ import {
   formatPercentBR,
   formatIntegerInputBR,
   stripThousandsSep,
+  looksLikePercentInput,
+  parsePercentBR,
+  percentToQuantity,
 } from '../lib/metrics'
 
 const OPTIONAL_INT_FIELDS = [
@@ -84,6 +87,105 @@ function IntegerTextInput({
       required={required}
       value={formatIntegerInputBR(value)}
       onChange={(e) => onChange(stripThousandsSep(e.target.value))}
+    />
+  )
+}
+
+/**
+ * Campo de quantidade que também aceita percentual: digitar com vírgula (ex.: "12,5")
+ * é interpretado como 12,5% de `total` e convertido para a quantidade correspondente
+ * assim que o campo perde o foco. Sem vírgula, comporta-se como IntegerTextInput
+ * (ponto de milhar, resolvido a cada tecla) — nada muda para quem só digita inteiros.
+ */
+function PercentAwareIntegerInput({
+  value,
+  onChange,
+  placeholder,
+  total,
+  totalLabel,
+  fieldLabel,
+  onFieldError,
+}: {
+  value: string
+  onChange: (digits: string) => void
+  placeholder?: string
+  total: number | null
+  totalLabel: string
+  fieldLabel: string
+  onFieldError: (message: string | null) => void
+}) {
+  const [percentDraft, setPercentDraft] = useState<string | null>(null)
+  const originalValueRef = useRef<string>(value)
+
+  const displayValue = percentDraft !== null ? percentDraft : formatIntegerInputBR(value)
+
+  function handleFocus() {
+    originalValueRef.current = value
+  }
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const raw = e.target.value
+    if (looksLikePercentInput(raw)) {
+      const digitsAndComma = raw.replace(/[^\d,]/g, '')
+      const firstComma = digitsAndComma.indexOf(',')
+      const sanitized =
+        firstComma === -1 ? digitsAndComma : digitsAndComma.slice(0, firstComma + 1) + digitsAndComma.slice(firstComma + 1).replace(/,/g, '')
+      setPercentDraft(sanitized)
+      return
+    }
+    setPercentDraft(null)
+    onChange(stripThousandsSep(raw))
+  }
+
+  function revert(message: string) {
+    onFieldError(message)
+    onChange(originalValueRef.current)
+    setPercentDraft(null)
+  }
+
+  function handleBlur() {
+    if (percentDraft === null) return
+    const raw = percentDraft.trim()
+    if (raw === '' || raw === ',') {
+      onChange('')
+      onFieldError(null)
+      setPercentDraft(null)
+      return
+    }
+    const pct = parsePercentBR(raw)
+    if (pct === 'invalid') {
+      revert(`Percentual inválido em "${fieldLabel}". Digite os dígitos decimais após a vírgula, ex.: 12,5.`)
+      return
+    }
+    if (total === null || total <= 0) {
+      revert(`Informe "${totalLabel}" antes de digitar um percentual em "${fieldLabel}".`)
+      return
+    }
+    if (pct > 100) {
+      revert(`O percentual de "${fieldLabel}" não pode ultrapassar 100% de "${totalLabel}".`)
+      return
+    }
+    onChange(String(percentToQuantity(pct, total)))
+    onFieldError(null)
+    setPercentDraft(null)
+  }
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      autoComplete="off"
+      placeholder={placeholder}
+      value={displayValue}
+      onFocus={handleFocus}
+      onChange={handleChange}
+      onBlur={handleBlur}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          ;(e.target as HTMLInputElement).blur()
+        }
+      }}
     />
   )
 }
@@ -206,6 +308,9 @@ export default function MetricForm({
     return sum + (typeof parsed === 'number' ? parsed : 0)
   }, 0)
 
+  const parsedFollowersTotal = parseOptionalInt(values.followers)
+  const followersTotal = typeof parsedFollowersTotal === 'number' ? parsedFollowersTotal : null
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setFieldError(null)
@@ -312,6 +417,26 @@ export default function MetricForm({
     )
   }
 
+  /** Campo de quantidade que também aceita "12,5" como 12,5% de `totalField`. */
+  function percentField(field: OptionalIntField, totalField: OptionalIntField) {
+    const parsedTotal = parseOptionalInt(values[totalField])
+    const total = typeof parsedTotal === 'number' ? parsedTotal : null
+    return (
+      <label key={field}>
+        {FIELD_LABELS[field]}
+        <PercentAwareIntegerInput
+          placeholder="indisponível"
+          value={values[field]}
+          onChange={(digits) => setField(field, digits)}
+          total={total}
+          totalLabel={FIELD_LABELS[totalField]}
+          fieldLabel={FIELD_LABELS[field]}
+          onFieldError={setFieldError}
+        />
+      </label>
+    )
+  }
+
   return (
     <form className="metric-form-v2" onSubmit={handleSubmit}>
       <fieldset>
@@ -345,23 +470,23 @@ export default function MetricForm({
         <div className="field-grid">
           {numberField('views_total')}
           {numberField('viewers_total')}
-          {numberField('views_from_followers')}
-          {numberField('views_from_non_followers')}
+          {percentField('views_from_followers', 'views_total')}
+          {percentField('views_from_non_followers', 'views_total')}
         </div>
 
         <h4>Por tipo de conteúdo</h4>
         <div className="two-col-audience">
           <div className="audience-col">
             <span className="audience-col-title">Seguidores</span>
-            {numberField('views_stories_followers')}
-            {numberField('views_posts_followers')}
-            {numberField('views_reels_followers')}
+            {percentField('views_stories_followers', 'views_from_followers')}
+            {percentField('views_posts_followers', 'views_from_followers')}
+            {percentField('views_reels_followers', 'views_from_followers')}
           </div>
           <div className="audience-col">
             <span className="audience-col-title">Não seguidores</span>
-            {numberField('views_stories_non_followers')}
-            {numberField('views_posts_non_followers')}
-            {numberField('views_reels_non_followers')}
+            {percentField('views_stories_non_followers', 'views_from_non_followers')}
+            {percentField('views_posts_non_followers', 'views_from_non_followers')}
+            {percentField('views_reels_non_followers', 'views_from_non_followers')}
           </div>
         </div>
 
@@ -372,21 +497,21 @@ export default function MetricForm({
         <legend>Interações</legend>
         <div className="field-grid">
           {numberField('interactions')}
-          {numberField('interactions_from_followers')}
-          {numberField('interactions_from_non_followers')}
+          {percentField('interactions_from_followers', 'interactions')}
+          {percentField('interactions_from_non_followers', 'interactions')}
         </div>
 
         <h4>Por tipo de conteúdo</h4>
         <div className="two-col-audience">
           <div className="audience-col">
             <span className="audience-col-title">Seguidores</span>
-            {numberField('interactions_stories_followers')}
-            {numberField('interactions_posts_followers')}
+            {percentField('interactions_stories_followers', 'interactions_from_followers')}
+            {percentField('interactions_posts_followers', 'interactions_from_followers')}
           </div>
           <div className="audience-col">
             <span className="audience-col-title">Não seguidores</span>
-            {numberField('interactions_stories_non_followers')}
-            {numberField('interactions_posts_non_followers')}
+            {percentField('interactions_stories_non_followers', 'interactions_from_non_followers')}
+            {percentField('interactions_posts_non_followers', 'interactions_from_non_followers')}
           </div>
         </div>
       </fieldset>
@@ -418,7 +543,15 @@ export default function MetricForm({
                 value={row.city}
                 onChange={(e) => updateLocationRow(i, { city: e.target.value })}
               />
-              <IntegerTextInput placeholder="Seguidores" value={row.count} onChange={(digits) => updateLocationRow(i, { count: digits })} />
+              <PercentAwareIntegerInput
+                placeholder="Seguidores"
+                value={row.count}
+                onChange={(digits) => updateLocationRow(i, { count: digits })}
+                total={followersTotal}
+                totalLabel="Seguidores totais"
+                fieldLabel={row.city.trim() ? `Localização (${row.city.trim()})` : 'Localização'}
+                onFieldError={setFieldError}
+              />
               {confirmingRemoveLocation === i ? (
                 <span className="confirm-delete">
                   Remover?
@@ -455,10 +588,14 @@ export default function MetricForm({
             return (
               <label key={range}>
                 {range}
-                <IntegerTextInput
+                <PercentAwareIntegerInput
                   placeholder="indisponível"
                   value={ageDrafts[range] ?? ''}
                   onChange={(digits) => setAgeDrafts((d) => ({ ...d, [range]: digits }))}
+                  total={followersTotal}
+                  totalLabel="Seguidores totais"
+                  fieldLabel={`Faixa etária ${range}`}
+                  onFieldError={setFieldError}
                 />
                 <span className="field-percent">{ageDrafts[range] ? formatPercentBR(percentage(count, ageTotal)) : ''}</span>
               </label>
@@ -476,10 +613,14 @@ export default function MetricForm({
             return (
               <label key={gender}>
                 {GENDER_LABELS[gender]}
-                <IntegerTextInput
+                <PercentAwareIntegerInput
                   placeholder="indisponível"
                   value={genderDrafts[gender] ?? ''}
                   onChange={(digits) => setGenderDrafts((d) => ({ ...d, [gender]: digits }))}
+                  total={followersTotal}
+                  totalLabel="Seguidores totais"
+                  fieldLabel={`Gênero ${GENDER_LABELS[gender]}`}
+                  onFieldError={setFieldError}
                 />
                 <span className="field-percent">{genderDrafts[gender] ? formatPercentBR(percentage(count, genderTotal)) : ''}</span>
               </label>

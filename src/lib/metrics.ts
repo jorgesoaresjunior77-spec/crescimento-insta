@@ -45,6 +45,24 @@ export function formatIntegerInputBR(digits: string): string {
   return new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 }).format(n)
 }
 
+/** A vírgula é o identificador exclusivo de percentual nos campos de quantidade+percentual; o ponto continua reservado para milhar. */
+export function looksLikePercentInput(raw: string): boolean {
+  return raw.includes(',')
+}
+
+/** Converte um texto digitado no padrão BR (vírgula decimal) em número; 'invalid' se não for um percentual bem formado. */
+export function parsePercentBR(raw: string): number | 'invalid' {
+  const cleaned = raw.trim().replace(/\./g, '')
+  if (!/^\d+,\d+$/.test(cleaned)) return 'invalid'
+  const n = Number(cleaned.replace(',', '.'))
+  return Number.isFinite(n) && n >= 0 ? n : 'invalid'
+}
+
+/** Converte um percentual em quantidade inteira, arredondando para o inteiro mais próximo. */
+export function percentToQuantity(percent: number, total: number): number {
+  return Math.round((percent / 100) * total)
+}
+
 export interface Variation {
   absolute: number
   percent: number | null

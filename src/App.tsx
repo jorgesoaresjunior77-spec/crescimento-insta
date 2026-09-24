@@ -23,7 +23,7 @@ import {
 import MetricForm from './components/MetricForm'
 import GrowthCharts from './components/GrowthCharts'
 import GoalCard from './components/GoalCard'
-import BrazilAudienceMap, { type StateAudience } from './components/BrazilAudienceMap'
+import BrazilAudienceMap from './components/BrazilAudienceMap'
 
 type LoadState<T> =
   | { status: 'loading' }
@@ -104,24 +104,29 @@ function App() {
     [sortedMetrics, range],
   )
 
-  const stateAudience = useMemo<StateAudience[]>(() => {
+  const mapLocations = useMemo<DailyMetric['audience']['locations']>(() => {
     // Mesma referência temporal do card "Principais cidades" (GrowthCharts.tsx): o registro
     // mais recente do período que tenha localizações, não a soma de todos os registros —
-    // followers_count por localização é um snapshot, não um incremento diário.
-    let latestLocations: DailyMetric['audience']['locations'] = []
+    // followers_count por localização é um snapshot, não um incremento diário. A agregação
+    // por estado (e o detalhamento por cidade do tooltip) é feita dentro de BrazilAudienceMap.
     for (let i = filteredMetrics.length - 1; i >= 0; i--) {
       if (filteredMetrics[i].audience.locations.length > 0) {
-        latestLocations = filteredMetrics[i].audience.locations
-        break
+        return filteredMetrics[i].audience.locations
       }
     }
-    const totals = new Map<string, number>()
-    for (const loc of latestLocations) {
-      if (!loc.state) continue
-      totals.set(loc.state, (totals.get(loc.state) ?? 0) + loc.followers_count)
-    }
-    return Array.from(totals, ([state, followers_count]) => ({ state, followers_count }))
+    return []
   }, [filteredMetrics])
+
+  const templateLocations = useMemo<DailyMetric['audience']['locations']>(() => {
+    // Cidades do registro mais recente (histórico completo, sem filtro de período) usadas
+    // como base para o próximo "Adicionar registro" — ver MetricForm.tsx.
+    for (let i = sortedMetrics.length - 1; i >= 0; i--) {
+      if (sortedMetrics[i].audience.locations.length > 0) {
+        return sortedMetrics[i].audience.locations
+      }
+    }
+    return []
+  }, [sortedMetrics])
 
   function handleCreateSubmit(input: NewMetricInput) {
     setCreateStatus('saving')
@@ -255,24 +260,25 @@ function App() {
           <h2>Seguidores por estado</h2>
           <div className="chart-card">
             <h3>Mapa do Brasil</h3>
-            {stateAudience.length === 0 ? (
+            {mapLocations.length === 0 ? (
               <p className="state-message chart-empty">
                 Sem dados suficientes ainda. Cadastre localizações com UF para ver o mapa.
               </p>
             ) : (
-              <BrazilAudienceMap data={stateAudience} />
+              <BrazilAudienceMap locations={mapLocations} />
             )}
           </div>
         </section>
       )}
 
-      {selectedAccount && (
+      {selectedAccount && metricsState.status !== 'loading' && (
         <section className="add-metric">
           <h2>Adicionar registro</h2>
           <MetricForm
             key={createFormKey}
             accountId={selectedAccount.id}
             mode="create"
+            templateLocations={templateLocations}
             submitting={createStatus === 'saving'}
             error={createError}
             onSubmit={handleCreateSubmit}

@@ -27,6 +27,22 @@ export function formatPercentBR(value: number | null): string {
 /** Alias mantido para compatibilidade com chamadas existentes. */
 export const formatPercent = formatPercentBR
 
+/** Percentual compacto (1 casa decimal) usado em rótulos curtos, como o tooltip do mapa. */
+export function formatPercentShortBR(value: number): string {
+  return `${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(value)}%`
+}
+
+/**
+ * O backend devolve `city` no formato combinado "Nome UF" (compatibilidade com o gráfico
+ * "Principais cidades"). Remove apenas o sufixo " UF" já confirmado por `state` (nunca
+ * "adivinhado" a partir do texto).
+ */
+export function bareCityName(city: string, state: string | null): string {
+  if (!state) return city
+  const suffix = ` ${state}`
+  return city.endsWith(suffix) ? city.slice(0, city.length - suffix.length) : city
+}
+
 /** Quantidade no padrão brasileiro: ponto como separador de milhares, sem casas decimais. */
 export function formatNumber(value: number | null): string {
   return value === null ? 'indisponível' : new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 }).format(value)

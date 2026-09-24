@@ -14,6 +14,7 @@ import {
   looksLikePercentInput,
   parsePercentBR,
   percentToQuantity,
+  bareCityName,
 } from '../lib/metrics'
 
 const OPTIONAL_INT_FIELDS = [
@@ -197,17 +198,6 @@ interface LocationDraft {
   count: string
 }
 
-/**
- * O backend ainda devolve `city` no formato combinado "Nome UF" (compatibilidade com o
- * gráfico "Principais cidades"). Para editar, removemos apenas o sufixo " UF" já
- * confirmado por `state` (nunca "adivinhado" a partir do texto).
- */
-function bareCityName(city: string, state: string | null): string {
-  if (!state) return city
-  const suffix = ` ${state}`
-  return city.endsWith(suffix) ? city.slice(0, city.length - suffix.length) : city
-}
-
 type FormValues = {
   date: string
   followers: string
@@ -253,11 +243,23 @@ function metricToGenderDrafts(m?: DailyMetric): Record<string, string> {
   return out
 }
 
-function metricToLocationDrafts(m?: DailyMetric): LocationDraft[] {
+/**
+ * Ao editar um registro existente, parte das localizações já salvas nele (com as
+ * quantidades). Ao criar um registro novo, parte das cidades do registro mais recente
+ * (`template`) que já tiver localizações — mantendo cidade/UF, mas com a quantidade em
+ * branco para o usuário preencher com o valor do novo dia. Sem histórico algum, usa os
+ * defaults atuais.
+ */
+function metricToLocationDrafts(m?: DailyMetric, template?: DailyMetric['audience']['locations']): LocationDraft[] {
   if (m && m.audience.locations.length > 0) {
     return [...m.audience.locations]
       .sort((a, b) => b.followers_count - a.followers_count)
       .map((l) => ({ city: bareCityName(l.city, l.state), state: l.state ?? '', count: String(l.followers_count) }))
+  }
+  if (!m && template && template.length > 0) {
+    return [...template]
+      .sort((a, b) => b.followers_count - a.followers_count)
+      .map((l) => ({ city: bareCityName(l.city, l.state), state: l.state ?? '', count: '' }))
   }
   return [
     { city: 'São Paulo', state: 'SP', count: '' },
@@ -270,6 +272,8 @@ interface MetricFormProps {
   accountId: string
   mode: 'create' | 'edit'
   initial?: DailyMetric
+  /** Cidades do registro mais recente (com localizações), usadas como base ao criar um novo registro. */
+  templateLocations?: DailyMetric['audience']['locations']
   submitting: boolean
   error: string | null
   onSubmit: (input: NewMetricInput) => void
@@ -282,6 +286,7 @@ export default function MetricForm({
   accountId,
   mode,
   initial,
+  templateLocations,
   submitting,
   error,
   onSubmit,
@@ -292,7 +297,7 @@ export default function MetricForm({
   const [values, setValues] = useState<FormValues>(() => (initial ? metricToFormValues(initial) : emptyFormValues()))
   const [ageDrafts, setAgeDrafts] = useState<Record<string, string>>(() => metricToAgeDrafts(initial))
   const [genderDrafts, setGenderDrafts] = useState<Record<string, string>>(() => metricToGenderDrafts(initial))
-  const [locationDrafts, setLocationDrafts] = useState<LocationDraft[]>(() => metricToLocationDrafts(initial))
+  const [locationDrafts, setLocationDrafts] = useState<LocationDraft[]>(() => metricToLocationDrafts(initial, templateLocations))
   const [fieldError, setFieldError] = useState<string | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [confirmingRemoveLocation, setConfirmingRemoveLocation] = useState<number | null>(null)

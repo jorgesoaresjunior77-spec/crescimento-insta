@@ -12,6 +12,12 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const AGE_RANGES = ["13-17", "18-24", "25-34", "35-44", "45-54", "55-64", "65+"] as const;
 const GENDERS = ["female", "male", "other"] as const;
 
+const BRAZIL_UF_CODES = [
+  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA",
+  "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN",
+  "RS", "RO", "RR", "SC", "SP", "SE", "TO",
+] as const;
+
 const OPTIONAL_METRIC_INT_FIELDS = [
   "reach",
   "interactions",
@@ -85,8 +91,15 @@ interface DailyMetricRow {
   comments: number | null;
 }
 
+interface AudienceLocationInput {
+  city: string;
+  state: string;
+  followers_count: number;
+}
 interface AudienceLocationRow {
   city: string;
+  state: string | null;
+  city_id: string | null;
   followers_count: number;
 }
 interface AudienceAgeRangeRow {
@@ -99,6 +112,11 @@ interface AudienceGenderRow {
 }
 interface Audience {
   locations: AudienceLocationRow[];
+  age_ranges: AudienceAgeRangeRow[];
+  genders: AudienceGenderRow[];
+}
+interface AudienceInput {
+  locations: AudienceLocationInput[];
   age_ranges: AudienceAgeRangeRow[];
   genders: AudienceGenderRow[];
 }
@@ -171,14 +189,14 @@ async function parseJsonBody(request: Request): Promise<{ ok: true; body: Record
 }
 
 type AudienceResult =
-  | { ok: true; value: Audience }
+  | { ok: true; value: AudienceInput }
   | { ok: false; error: string };
 
-function validateAudienceLocations(raw: unknown): { ok: true; value: AudienceLocationRow[] } | { ok: false; error: string } {
+function validateAudienceLocations(raw: unknown): { ok: true; value: AudienceLocationInput[] } | { ok: false; error: string } {
   if (raw === undefined || raw === null) return { ok: true, value: [] };
   if (!Array.isArray(raw)) return { ok: false, error: "audience.locations deve ser uma lista." };
   const seen = new Set<string>();
-  const out: AudienceLocationRow[] = [];
+  const out: AudienceLocationInput[] = [];
   for (const item of raw) {
     if (typeof item !== "object" || item === null) {
       return { ok: false, error: "Cada item de audience.locations deve ser um objeto." };
@@ -189,14 +207,27 @@ function validateAudienceLocations(raw: unknown): { ok: true; value: AudienceLoc
       return { ok: false, error: "audience.locations: 'city' é obrigatório." };
     }
     const trimmedCity = city.trim();
+
+    const state = record.state;
+    if (typeof state !== "string" || state.trim() === "") {
+      return { ok: false, error: `audience.locations (${trimmedCity}): 'state' é obrigatório.` };
+    }
+    const normalizedState = state.trim().toUpperCase();
+    if (normalizedState.length !== 2) {
+      return { ok: false, error: `audience.locations (${trimmedCity}): 'state' deve ter exatamente 2 letras.` };
+    }
+    if (!(BRAZIL_UF_CODES as readonly string[]).includes(normalizedState)) {
+      return { ok: false, error: `audience.locations (${trimmedCity}): 'state' deve ser uma sigla de UF válida.` };
+    }
+
     const count = validateNonNegInt(record.followers_count, `audience.locations (${trimmedCity}) followers_count`, true);
     if (!count.ok) return { ok: false, error: count.error };
-    const key = trimmedCity.toLowerCase();
+    const key = `${trimmedCity.toLowerCase()}|${normalizedState}`;
     if (seen.has(key)) {
-      return { ok: false, error: `Cidade duplicada em audience.locations: ${trimmedCity}.` };
+      return { ok: false, error: `Cidade duplicada em audience.locations: ${trimmedCity} (${normalizedState}).` };
     }
     seen.add(key);
-    out.push({ city: trimmedCity, followers_count: count.value as number });
+    out.push({ city: trimmedCity, state: normalizedState, followers_count: count.value as number });
   }
   return { ok: true, value: out };
 }
@@ -276,9 +307,34 @@ function withSortedLocations(audience: Audience): Audience {
   return { ...audience, locations: [...audience.locations].sort((a, b) => b.followers_count - a.followers_count) };
 }
 
+/**
+ * Resolve o id de uma cidade em `cities` a partir de (name, state), criando-a se necessário.
+ * O INSERT ... ON CONFLICT ... DO UPDATE garante que o RETURNING sempre devolva o id,
+ * mesmo quando outra requisição concorrente já tiver criado a mesma cidade nesse meio-tempo.
+ */
+async function resolveCityId(sql: ReturnType<typeof neon>, name: string, state: string): Promise<string> {
+  const existingRows = await sql`select id from cities where name = ${name} and state = ${state}`;
+  if (existingRows.length > 0) {
+    return (existingRows as { id: string }[])[0].id;
+  }
+  const insertedRows = await sql`
+    insert into cities (name, state)
+    values (${name}, ${state})
+    on conflict (name, state) do update set name = excluded.name
+    returning id
+  `;
+  return (insertedRows as { id: string }[])[0].id;
+}
+
 async function fetchAudienceForId(sql: ReturnType<typeof neon>, dailyMetricId: string): Promise<Audience> {
   const [locationRows, ageRangeRows, genderRows] = await Promise.all([
-    sql`select city, followers_count from audience_locations where daily_metric_id = ${dailyMetricId} order by followers_count desc`,
+    sql`
+      select al.city, al.city_id, c.state, al.followers_count
+      from audience_locations al
+      left join cities c on c.id = al.city_id
+      where al.daily_metric_id = ${dailyMetricId}
+      order by al.followers_count desc
+    `,
     sql`select age_range, followers_count from audience_age_ranges where daily_metric_id = ${dailyMetricId}`,
     sql`select gender, followers_count from audience_genders where daily_metric_id = ${dailyMetricId}`,
   ]);
@@ -320,9 +376,10 @@ async function handleGet(request: Request, sql: ReturnType<typeof neon>): Promis
 
     const [locationRows, ageRangeRows, genderRows] = await Promise.all([
       sql`
-        select al.daily_metric_id, al.city, al.followers_count
+        select al.daily_metric_id, al.city, al.city_id, c.state, al.followers_count
         from audience_locations al
         join daily_metrics dm on dm.id = al.daily_metric_id
+        left join cities c on c.id = al.city_id
         where dm.account_id = ${accountId}
           and (${from}::date is null or dm.date >= ${from}::date)
           and (${to}::date is null or dm.date <= ${to}::date)
@@ -348,8 +405,13 @@ async function handleGet(request: Request, sql: ReturnType<typeof neon>): Promis
 
     const withAudience = metrics.map((m) => ({ ...m, audience: emptyAudience() }));
     const byId = new Map(withAudience.map((m) => [m.id, m]));
-    for (const row of locationRows as Array<{ daily_metric_id: string; city: string; followers_count: number }>) {
-      byId.get(row.daily_metric_id)?.audience.locations.push({ city: row.city, followers_count: row.followers_count });
+    for (const row of locationRows as Array<{ daily_metric_id: string; city: string; city_id: string | null; state: string | null; followers_count: number }>) {
+      byId.get(row.daily_metric_id)?.audience.locations.push({
+        city: row.city,
+        state: row.state,
+        city_id: row.city_id,
+        followers_count: row.followers_count,
+      });
     }
     for (const row of ageRangeRows as Array<{ daily_metric_id: string; age_range: string; followers_count: number }>) {
       byId.get(row.daily_metric_id)?.audience.age_ranges.push({ age_range: row.age_range, followers_count: row.followers_count });
@@ -416,6 +478,17 @@ async function handlePost(request: Request, sql: ReturnType<typeof neon>): Promi
     const newId = randomUUID();
     const o = optionalInts;
 
+    const resolvedLocations: AudienceLocationRow[] = [];
+    for (const loc of audience.value.locations) {
+      const cityId = await resolveCityId(sql, loc.city, loc.state);
+      resolvedLocations.push({
+        city: `${loc.city} ${loc.state}`,
+        state: loc.state,
+        city_id: cityId,
+        followers_count: loc.followers_count,
+      });
+    }
+
     const queries = [
       sql`
         insert into daily_metrics
@@ -441,8 +514,8 @@ async function handlePost(request: Request, sql: ReturnType<typeof neon>): Promi
            ${o.replies}, ${o.shares}, ${o.likes}, ${o.comments})
         returning ${sql.unsafe(METRIC_COLUMNS)}
       `,
-      ...audience.value.locations.map(
-        (loc) => sql`insert into audience_locations (daily_metric_id, city, followers_count) values (${newId}, ${loc.city}, ${loc.followers_count})`,
+      ...resolvedLocations.map(
+        (loc) => sql`insert into audience_locations (daily_metric_id, city, city_id, followers_count) values (${newId}, ${loc.city}, ${loc.city_id}, ${loc.followers_count})`,
       ),
       ...audience.value.age_ranges.map(
         (a) => sql`insert into audience_age_ranges (daily_metric_id, age_range, followers_count) values (${newId}, ${a.age_range}, ${a.followers_count})`,
@@ -454,7 +527,12 @@ async function handlePost(request: Request, sql: ReturnType<typeof neon>): Promi
 
     const results = await sql.transaction(queries);
     const inserted = (results[0] as unknown as DailyMetricRow[])[0];
-    return json({ metric: { ...inserted, audience: withSortedLocations(audience.value) } }, 201);
+    const responseAudience: Audience = {
+      locations: resolvedLocations,
+      age_ranges: audience.value.age_ranges,
+      genders: audience.value.genders,
+    };
+    return json({ metric: { ...inserted, audience: withSortedLocations(responseAudience) } }, 201);
   } catch (err) {
     const code = pgErrorCode(err);
     if (code === "23505") {
@@ -518,7 +596,7 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
     note = result.value;
   }
 
-  let audienceUpdate: Audience | undefined;
+  let audienceUpdate: AudienceInput | undefined;
   if (has("audience")) {
     const result = validateAudience(body.audience);
     if (!result.ok) return errorResponse(result.error, 400);
@@ -571,6 +649,20 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
       }
     }
 
+    let resolvedLocations: AudienceLocationRow[] | undefined;
+    if (audienceUpdate) {
+      resolvedLocations = [];
+      for (const loc of audienceUpdate.locations) {
+        const cityId = await resolveCityId(sql, loc.city, loc.state);
+        resolvedLocations.push({
+          city: `${loc.city} ${loc.state}`,
+          state: loc.state,
+          city_id: cityId,
+          followers_count: loc.followers_count,
+        });
+      }
+    }
+
     const m = merged;
     const queries = [
       sql`
@@ -607,13 +699,13 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
       `,
     ];
 
-    if (audienceUpdate) {
+    if (audienceUpdate && resolvedLocations) {
       queries.push(
         sql`delete from audience_locations where daily_metric_id = ${id}`,
         sql`delete from audience_age_ranges where daily_metric_id = ${id}`,
         sql`delete from audience_genders where daily_metric_id = ${id}`,
-        ...audienceUpdate.locations.map(
-          (loc) => sql`insert into audience_locations (daily_metric_id, city, followers_count) values (${id}, ${loc.city}, ${loc.followers_count})`,
+        ...resolvedLocations.map(
+          (loc) => sql`insert into audience_locations (daily_metric_id, city, city_id, followers_count) values (${id}, ${loc.city}, ${loc.city_id}, ${loc.followers_count})`,
         ),
         ...audienceUpdate.age_ranges.map(
           (a) => sql`insert into audience_age_ranges (daily_metric_id, age_range, followers_count) values (${id}, ${a.age_range}, ${a.followers_count})`,
@@ -626,7 +718,10 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
 
     const results = await sql.transaction(queries);
     const updated = (results[0] as unknown as DailyMetricRow[])[0];
-    const audienceForResponse = withSortedLocations(audienceUpdate ?? (await fetchAudienceForId(sql, id)));
+    const audienceForResponse =
+      audienceUpdate && resolvedLocations
+        ? withSortedLocations({ locations: resolvedLocations, age_ranges: audienceUpdate.age_ranges, genders: audienceUpdate.genders })
+        : withSortedLocations(await fetchAudienceForId(sql, id));
     return json({ metric: { ...updated, audience: audienceForResponse } }, 200);
   } catch (err) {
     const code = pgErrorCode(err);

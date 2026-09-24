@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import type { DailyMetric, NewMetricInput } from '../lib/api'
+import { BRAZIL_STATES } from '../lib/api'
 import {
   AGE_RANGES,
   GENDERS,
@@ -192,7 +193,19 @@ function PercentAwareIntegerInput({
 
 interface LocationDraft {
   city: string
+  state: string
   count: string
+}
+
+/**
+ * O backend ainda devolve `city` no formato combinado "Nome UF" (compatibilidade com o
+ * gráfico "Principais cidades"). Para editar, removemos apenas o sufixo " UF" já
+ * confirmado por `state` (nunca "adivinhado" a partir do texto).
+ */
+function bareCityName(city: string, state: string | null): string {
+  if (!state) return city
+  const suffix = ` ${state}`
+  return city.endsWith(suffix) ? city.slice(0, city.length - suffix.length) : city
 }
 
 type FormValues = {
@@ -244,12 +257,12 @@ function metricToLocationDrafts(m?: DailyMetric): LocationDraft[] {
   if (m && m.audience.locations.length > 0) {
     return [...m.audience.locations]
       .sort((a, b) => b.followers_count - a.followers_count)
-      .map((l) => ({ city: l.city, count: String(l.followers_count) }))
+      .map((l) => ({ city: bareCityName(l.city, l.state), state: l.state ?? '', count: String(l.followers_count) }))
   }
   return [
-    { city: 'São Paulo', count: '' },
-    { city: 'Rio de Janeiro', count: '' },
-    { city: 'Belo Horizonte', count: '' },
+    { city: 'São Paulo', state: 'SP', count: '' },
+    { city: 'Rio de Janeiro', state: 'RJ', count: '' },
+    { city: 'Belo Horizonte', state: 'MG', count: '' },
   ]
 }
 
@@ -289,7 +302,7 @@ export default function MetricForm({
   }
 
   function addLocationRow() {
-    setLocationDrafts((rows) => [...rows, { city: '', count: '' }])
+    setLocationDrafts((rows) => [...rows, { city: '', state: '', count: '' }])
   }
   function removeLocationRow(index: number) {
     setLocationDrafts((rows) => rows.filter((_, i) => i !== index))
@@ -340,10 +353,13 @@ export default function MetricForm({
       parsedOptional[field] = parsed
     }
 
-    const locations: { city: string; followers_count: number }[] = []
+    const locations: { city: string; state: string; followers_count: number }[] = []
     for (const row of locationDrafts) {
-      if (row.city.trim() === '' && row.count.trim() === '') continue
-      if (row.city.trim() === '') {
+      const cityBlank = row.city.trim() === ''
+      const stateBlank = row.state.trim() === ''
+      const countBlank = row.count.trim() === ''
+      if (cityBlank && stateBlank && countBlank) continue
+      if (cityBlank) {
         setFieldError('Informe o nome da cidade ou deixe a linha vazia.')
         return
       }
@@ -353,7 +369,11 @@ export default function MetricForm({
         return
       }
       if (count === null) continue
-      locations.push({ city: row.city.trim(), followers_count: count })
+      if (stateBlank) {
+        setFieldError(`Selecione o estado (UF) da cidade ${row.city.trim()}.`)
+        return
+      }
+      locations.push({ city: row.city.trim(), state: row.state.trim(), followers_count: count })
     }
 
     const ageRanges: { age_range: string; followers_count: number }[] = []
@@ -543,6 +563,18 @@ export default function MetricForm({
                 value={row.city}
                 onChange={(e) => updateLocationRow(i, { city: e.target.value })}
               />
+              <select
+                value={row.state}
+                onChange={(e) => updateLocationRow(i, { state: e.target.value })}
+                aria-label={row.city.trim() ? `UF de ${row.city.trim()}` : 'UF'}
+              >
+                <option value="">UF</option>
+                {BRAZIL_STATES.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
               <PercentAwareIntegerInput
                 placeholder="Seguidores"
                 value={row.count}

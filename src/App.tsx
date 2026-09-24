@@ -23,6 +23,7 @@ import {
 import MetricForm from './components/MetricForm'
 import GrowthCharts from './components/GrowthCharts'
 import GoalCard from './components/GoalCard'
+import BrazilAudienceMap, { type StateAudience } from './components/BrazilAudienceMap'
 
 type LoadState<T> =
   | { status: 'loading' }
@@ -102,6 +103,25 @@ function App() {
     () => sortedMetrics.filter((m) => m.date >= range.from && m.date <= range.to),
     [sortedMetrics, range],
   )
+
+  const stateAudience = useMemo<StateAudience[]>(() => {
+    // Mesma referência temporal do card "Principais cidades" (GrowthCharts.tsx): o registro
+    // mais recente do período que tenha localizações, não a soma de todos os registros —
+    // followers_count por localização é um snapshot, não um incremento diário.
+    let latestLocations: DailyMetric['audience']['locations'] = []
+    for (let i = filteredMetrics.length - 1; i >= 0; i--) {
+      if (filteredMetrics[i].audience.locations.length > 0) {
+        latestLocations = filteredMetrics[i].audience.locations
+        break
+      }
+    }
+    const totals = new Map<string, number>()
+    for (const loc of latestLocations) {
+      if (!loc.state) continue
+      totals.set(loc.state, (totals.get(loc.state) ?? 0) + loc.followers_count)
+    }
+    return Array.from(totals, ([state, followers_count]) => ({ state, followers_count }))
+  }, [filteredMetrics])
 
   function handleCreateSubmit(input: NewMetricInput) {
     setCreateStatus('saving')
@@ -227,6 +247,22 @@ function App() {
         <section className="charts-section">
           <h2>Dashboard</h2>
           <GrowthCharts metrics={filteredMetrics} />
+        </section>
+      )}
+
+      {selectedAccount && metricsState.status === 'ready' && (
+        <section className="charts-section">
+          <h2>Seguidores por estado</h2>
+          <div className="chart-card">
+            <h3>Mapa do Brasil</h3>
+            {stateAudience.length === 0 ? (
+              <p className="state-message chart-empty">
+                Sem dados suficientes ainda. Cadastre localizações com UF para ver o mapa.
+              </p>
+            ) : (
+              <BrazilAudienceMap data={stateAudience} />
+            )}
+          </div>
         </section>
       )}
 

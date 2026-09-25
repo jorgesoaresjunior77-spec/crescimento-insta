@@ -113,7 +113,7 @@ export default function WorldAudienceMap({ countries }: { countries: AudienceCou
               </table>
             </>
           ) : (
-            <span className="audience-map-panel-empty">Passe o mouse sobre um país para ver o percentual.</span>
+            <span className="audience-map-panel-empty">Sem dados de países ainda.</span>
           )}
         </div>
       </div>

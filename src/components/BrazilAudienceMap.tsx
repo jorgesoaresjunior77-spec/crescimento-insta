@@ -60,6 +60,7 @@ function fixRingWinding(features: Feature<Geometry>[]): Feature<Geometry>[] {
  */
 export default function BrazilAudienceMap({ locations }: { locations: AudienceLocation[] }) {
   const [hovered, setHovered] = useState<HoverInfo | null>(null)
+  const hasData = locations.length > 0
 
   const { totalsByState, citiesByState } = useMemo(() => {
     const totals = new Map<string, number>()
@@ -148,8 +149,10 @@ export default function BrazilAudienceMap({ locations }: { locations: AudienceLo
                 </table>
               )}
             </>
-          ) : (
+          ) : hasData ? (
             <span className="audience-map-panel-empty">Passe o mouse sobre um estado para ver o detalhamento por cidade.</span>
+          ) : (
+            <span className="audience-map-panel-empty">Sem dados de localização ainda.</span>
           )}
         </div>
       </div>

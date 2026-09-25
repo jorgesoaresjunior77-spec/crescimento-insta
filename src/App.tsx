@@ -249,35 +249,26 @@ function App() {
         </section>
       )}
 
-      {selectedAccount && metricsState.status === 'ready' && (
+      {/*
+        'loading' e 'error' ficam de fora de propósito (mantém o comportamento já existente:
+        essas seções só aparecem quando há uma resposta da API, seja com dados ou vazia).
+        'empty' entra aqui para que Dashboard e mapas fiquem visíveis mesmo sem nenhum
+        registro ainda — cada componente sabe renderizar seu próprio estado vazio/neutro
+        (GrowthCharts já faz isso por gráfico; BrazilAudienceMap/WorldAudienceMap idem).
+      */}
+      {selectedAccount && (metricsState.status === 'ready' || metricsState.status === 'empty') && (
         <section className="charts-section">
           <h2>Dashboard</h2>
           <GrowthCharts metrics={filteredMetrics} />
         </section>
       )}
 
-      {selectedAccount && metricsState.status === 'ready' && (
+      {selectedAccount && (metricsState.status === 'ready' || metricsState.status === 'empty') && (
         <section className="charts-section">
           <h2>Distribuição geográfica</h2>
           <div className="maps-row">
-            {mapLocations.length === 0 ? (
-              <div className="chart-card audience-map-card">
-                <h3>Mapa do Brasil</h3>
-                <p className="state-message chart-empty">
-                  Sem dados suficientes ainda. Cadastre localizações com UF para ver o mapa.
-                </p>
-              </div>
-            ) : (
-              <BrazilAudienceMap locations={mapLocations} />
-            )}
-            {mapCountries.length === 0 ? (
-              <div className="chart-card audience-map-card">
-                <h3>Mapa Mundi</h3>
-                <p className="state-message chart-empty">Sem dados suficientes ainda. Cadastre países para ver o mapa.</p>
-              </div>
-            ) : (
-              <WorldAudienceMap countries={mapCountries} />
-            )}
+            <BrazilAudienceMap locations={mapLocations} />
+            <WorldAudienceMap countries={mapCountries} />
           </div>
         </section>
       )}

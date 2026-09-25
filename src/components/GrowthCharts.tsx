@@ -14,12 +14,16 @@ import {
   YAxis,
 } from 'recharts'
 import type { DailyMetric } from '../lib/api'
-import { AGE_RANGES, GENDER_LABELS, GENDERS, formatCalendarDateBR } from '../lib/metrics'
+import { AGE_RANGES, formatCalendarDateBR } from '../lib/metrics'
 import { CHART_GRID_COLOR, CHART_TICK_STYLE, GRADIENTS, gradientAt } from '../lib/palette'
 
-function sumOrNull(a: number | null, b: number | null): number | null {
-  if (a === null && b === null) return null
-  return (a ?? 0) + (b ?? 0)
+const FORM_GENDER_LABELS: Record<string, string> = { female: 'Mulheres', male: 'Homens', other: 'Outro' }
+
+/** Soma os `content_type_metrics` de uma métrica para (metric_type, content_type), somando seguidores + não seguidores. */
+function sumContentType(m: DailyMetric, metricType: string, contentType: string): number | null {
+  const rows = m.content_type_metrics.filter((r) => r.metric_type === metricType && r.content_type === contentType)
+  if (rows.length === 0) return null
+  return rows.reduce((sum, r) => sum + r.value, 0)
 }
 
 function GradientDefs() {
@@ -71,9 +75,9 @@ export default function GrowthCharts({ metrics }: { metrics: DailyMetric[] }) {
     followers: m.followers,
     views_total: m.views_total,
     interactions: m.interactions,
-    views_stories: sumOrNull(m.views_stories_followers, m.views_stories_non_followers),
-    views_posts: sumOrNull(m.views_posts_followers, m.views_posts_non_followers),
-    views_reels: sumOrNull(m.views_reels_followers, m.views_reels_non_followers),
+    views_stories: sumContentType(m, 'views', 'stories'),
+    views_posts: sumContentType(m, 'views', 'posts'),
+    views_reels: sumContentType(m, 'views', 'reels'),
   }))
 
   const latestGenders = (() => {
@@ -82,7 +86,7 @@ export default function GrowthCharts({ metrics }: { metrics: DailyMetric[] }) {
     }
     return []
   })()
-  const genderData = latestGenders.map((g) => ({ name: GENDER_LABELS[g.gender as (typeof GENDERS)[number]] ?? g.gender, value: g.followers_count }))
+  const genderData = latestGenders.map((g) => ({ name: FORM_GENDER_LABELS[g.gender] ?? g.gender, value: g.percent }))
 
   const latestAges = (() => {
     for (let i = metrics.length - 1; i >= 0; i--) {
@@ -90,10 +94,13 @@ export default function GrowthCharts({ metrics }: { metrics: DailyMetric[] }) {
     }
     return []
   })()
-  const ageOrder = new Map(AGE_RANGES.map((r, i) => [r, i]))
-  const ageData = [...latestAges]
-    .sort((a, b) => (ageOrder.get(a.age_range as (typeof AGE_RANGES)[number]) ?? 0) - (ageOrder.get(b.age_range as (typeof AGE_RANGES)[number]) ?? 0))
-    .map((a) => ({ name: a.age_range, value: a.followers_count }))
+  // Rollup só para o gráfico: soma mulheres+homens por faixa, já que cada faixa agora tem 2 linhas (uma por gênero).
+  const ageOrder = new Map<string, number>(AGE_RANGES.map((r, i) => [r, i]))
+  const ageTotals = new Map<string, number>()
+  for (const row of latestAges) ageTotals.set(row.age_range, (ageTotals.get(row.age_range) ?? 0) + row.percent)
+  const ageData = [...ageTotals.entries()]
+    .sort((a, b) => (ageOrder.get(a[0]) ?? 0) - (ageOrder.get(b[0]) ?? 0))
+    .map(([age_range, value]) => ({ name: age_range, value }))
 
   const latestCities = (() => {
     for (let i = metrics.length - 1; i >= 0; i--) {
@@ -101,7 +108,7 @@ export default function GrowthCharts({ metrics }: { metrics: DailyMetric[] }) {
     }
     return []
   })()
-  const cityData = [...latestCities].sort((a, b) => b.followers_count - a.followers_count).slice(0, 8)
+  const cityData = [...latestCities].sort((a, b) => b.percent - a.percent).slice(0, 8)
 
   const hasViewsBreakdown = series.some((s) => s.views_stories !== null || s.views_posts !== null || s.views_reels !== null)
 
@@ -234,7 +241,7 @@ export default function GrowthCharts({ metrics }: { metrics: DailyMetric[] }) {
             <XAxis type="number" tick={CHART_TICK_STYLE} axisLine={{ stroke: CHART_GRID_COLOR }} tickLine={false} />
             <YAxis type="category" dataKey="city" tick={CHART_TICK_STYLE} axisLine={false} tickLine={false} width={110} />
             <Tooltip contentStyle={tooltipStyle} cursor={{ fill: 'rgba(139,92,246,0.08)' }} />
-            <Bar dataKey="followers_count" name="Seguidores" fill="url(#grad-violet)" radius={[0, 8, 8, 0]} style={{ filter: 'url(#chart-depth)' }} />
+            <Bar dataKey="percent" name="% da audiência" fill="url(#grad-violet)" radius={[0, 8, 8, 0]} style={{ filter: 'url(#chart-depth)' }} />
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>

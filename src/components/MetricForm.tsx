@@ -1,74 +1,73 @@
-import { useRef, useState } from 'react'
-import type { DailyMetric, NewMetricInput } from '../lib/api'
-import { BRAZIL_STATES } from '../lib/api'
+import { useState } from 'react'
+import type {
+  AudienceLocation,
+  ContentAudienceType,
+  ContentMetricType,
+  ContentType,
+  ContentTypeMetric,
+  DailyMetric,
+  NewMetricInput,
+} from '../lib/api'
+import { BRAZIL_STATES, CONTENT_AUDIENCE_TYPES, CONTENT_METRIC_TYPES, CONTENT_TYPES } from '../lib/api'
+import { COMMON_COUNTRIES, COUNTRY_LABEL_BY_ALPHA2 } from '../lib/worldCountries'
 import {
   AGE_RANGES,
-  GENDERS,
-  GENDER_LABELS,
-  parseOptionalInt,
-  parseRequiredInt,
-  percentage,
-  formatPercentBR,
   formatIntegerInputBR,
+  formatPercentBR,
+  parseOptionalInt,
+  parseOptionalPercentBR,
+  parseOptionalSignedInt,
+  parseRequiredInt,
+  sanitizePercentDraft,
+  stripSignedThousandsSep,
   stripThousandsSep,
-  looksLikePercentInput,
-  parsePercentBR,
-  percentToQuantity,
   bareCityName,
 } from '../lib/metrics'
 
-const OPTIONAL_INT_FIELDS = [
-  'interactions',
-  'profile_visits',
+/** Campos escalares opcionais de `daily_metrics` (contagem, sem sinal). */
+const SCALAR_OPTIONAL_FIELDS = [
   'views_total',
+  'viewers_total',
   'views_from_followers',
   'views_from_non_followers',
-  'viewers_total',
-  'views_stories_followers',
-  'views_stories_non_followers',
-  'views_posts_followers',
-  'views_posts_non_followers',
-  'views_reels_followers',
-  'views_reels_non_followers',
+  'interactions',
   'interactions_from_followers',
   'interactions_from_non_followers',
-  'interactions_stories_followers',
-  'interactions_stories_non_followers',
-  'interactions_posts_followers',
-  'interactions_posts_non_followers',
-  'replies',
-  'shares',
-  'likes',
-  'comments',
+  'profile_visits',
+  'bio_link_taps',
 ] as const
-type OptionalIntField = (typeof OPTIONAL_INT_FIELDS)[number]
+type ScalarOptionalField = (typeof SCALAR_OPTIONAL_FIELDS)[number]
 
-const FIELD_LABELS: Record<OptionalIntField, string> = {
-  interactions: 'Interações totais',
-  profile_visits: 'Visitas ao perfil',
-  views_total: 'Visualizações totais',
+const SCALAR_FIELD_LABELS: Record<ScalarOptionalField, string> = {
+  views_total: 'Visualizações',
+  viewers_total: 'Visualizadores',
   views_from_followers: 'Visualizações de seguidores',
   views_from_non_followers: 'Visualizações de não seguidores',
-  viewers_total: 'Visualizadores',
-  views_stories_followers: 'Stories',
-  views_stories_non_followers: 'Stories',
-  views_posts_followers: 'Posts',
-  views_posts_non_followers: 'Posts',
-  views_reels_followers: 'Reels',
-  views_reels_non_followers: 'Reels',
+  interactions: 'Interações',
   interactions_from_followers: 'Interações de seguidores',
   interactions_from_non_followers: 'Interações de não seguidores',
-  interactions_stories_followers: 'Stories',
-  interactions_stories_non_followers: 'Stories',
-  interactions_posts_followers: 'Posts',
-  interactions_posts_non_followers: 'Posts',
-  replies: 'Respostas',
-  shares: 'Compartilhamentos',
-  likes: 'Curtidas',
-  comments: 'Comentários',
+  profile_visits: 'Visitas no perfil',
+  bio_link_taps: 'Toques no link da bio',
 }
 
-/** Campo de quantidade: aceita digitação com ou sem ponto de milhar e sempre exibe formatado. */
+const CONTENT_GROUPS: { metricType: ContentMetricType; title: string; showTudo: boolean }[] = [
+  { metricType: 'views', title: 'Visualizações por tipo de conteúdo', showTudo: false },
+  { metricType: 'interactions', title: 'Interações por tipo de conteúdo', showTudo: true },
+  { metricType: 'likes', title: 'Curtidas', showTudo: false },
+  { metricType: 'comments', title: 'Comentários', showTudo: false },
+  { metricType: 'reposts', title: 'Reposts', showTudo: false },
+  { metricType: 'shares', title: 'Compartilhamentos', showTudo: false },
+  { metricType: 'saves', title: 'Salvamentos', showTudo: false },
+  { metricType: 'replies', title: 'Respostas', showTudo: false },
+]
+
+const CONTENT_TYPE_LABELS: Record<ContentType, string> = { reels: 'Reels', posts: 'Posts', stories: 'Stories' }
+
+const FORM_GENDERS = ['female', 'male'] as const
+type FormGender = (typeof FORM_GENDERS)[number]
+const FORM_GENDER_LABELS: Record<FormGender, string> = { female: 'Mulheres', male: 'Homens' }
+
+/** Campo de contagem: inteiro >= 0, aceita digitar com ou sem ponto de milhar, sempre exibe formatado. */
 function IntegerTextInput({
   value,
   onChange,
@@ -93,121 +92,167 @@ function IntegerTextInput({
   )
 }
 
-/**
- * Campo de quantidade que também aceita percentual: digitar com vírgula (ex.: "12,5")
- * é interpretado como 12,5% de `total` e convertido para a quantidade correspondente
- * assim que o campo perde o foco. Sem vírgula, comporta-se como IntegerTextInput
- * (ponto de milhar, resolvido a cada tecla) — nada muda para quem só digita inteiros.
- */
-function PercentAwareIntegerInput({
-  value,
-  onChange,
-  placeholder,
-  total,
-  totalLabel,
-  fieldLabel,
-  onFieldError,
-}: {
-  value: string
-  onChange: (digits: string) => void
-  placeholder?: string
-  total: number | null
-  totalLabel: string
-  fieldLabel: string
-  onFieldError: (message: string | null) => void
-}) {
-  const [percentDraft, setPercentDraft] = useState<string | null>(null)
-  const originalValueRef = useRef<string>(value)
-
-  const displayValue = percentDraft !== null ? percentDraft : formatIntegerInputBR(value)
-
-  function handleFocus() {
-    originalValueRef.current = value
-  }
-
-  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const raw = e.target.value
-    if (looksLikePercentInput(raw)) {
-      const digitsAndComma = raw.replace(/[^\d,]/g, '')
-      const firstComma = digitsAndComma.indexOf(',')
-      const sanitized =
-        firstComma === -1 ? digitsAndComma : digitsAndComma.slice(0, firstComma + 1) + digitsAndComma.slice(firstComma + 1).replace(/,/g, '')
-      setPercentDraft(sanitized)
-      return
-    }
-    setPercentDraft(null)
-    onChange(stripThousandsSep(raw))
-  }
-
-  function revert(message: string) {
-    onFieldError(message)
-    onChange(originalValueRef.current)
-    setPercentDraft(null)
-  }
-
-  function handleBlur() {
-    if (percentDraft === null) return
-    const raw = percentDraft.trim()
-    if (raw === '' || raw === ',') {
-      onChange('')
-      onFieldError(null)
-      setPercentDraft(null)
-      return
-    }
-    const pct = parsePercentBR(raw)
-    if (pct === 'invalid') {
-      revert(`Percentual inválido em "${fieldLabel}". Digite os dígitos decimais após a vírgula, ex.: 12,5.`)
-      return
-    }
-    if (total === null || total <= 0) {
-      revert(`Informe "${totalLabel}" antes de digitar um percentual em "${fieldLabel}".`)
-      return
-    }
-    if (pct > 100) {
-      revert(`O percentual de "${fieldLabel}" não pode ultrapassar 100% de "${totalLabel}".`)
-      return
-    }
-    onChange(String(percentToQuantity(pct, total)))
-    onFieldError(null)
-    setPercentDraft(null)
-  }
-
+/** Igual a IntegerTextInput, mas aceita um sinal negativo — usado só por "Seguidores líquidos". */
+function SignedIntegerTextInput({ value, onChange, placeholder }: { value: string; onChange: (digits: string) => void; placeholder?: string }) {
   return (
     <input
       type="text"
-      inputMode="decimal"
+      inputMode="numeric"
       autoComplete="off"
       placeholder={placeholder}
-      value={displayValue}
-      onFocus={handleFocus}
-      onChange={handleChange}
-      onBlur={handleBlur}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault()
-          ;(e.target as HTMLInputElement).blur()
-        }
-      }}
+      value={formatIntegerInputBR(value)}
+      onChange={(e) => onChange(stripSignedThousandsSep(e.target.value))}
     />
   )
+}
+
+/** Campo percentual nativo: vírgula decimal, 0–100, símbolo % exibido ao lado (nunca dentro do valor digitado). */
+function PercentInput({ value, onChange, placeholder }: { value: string; onChange: (raw: string) => void; placeholder?: string }) {
+  return (
+    <span className="percent-field">
+      <input
+        type="text"
+        inputMode="decimal"
+        autoComplete="off"
+        placeholder={placeholder ?? '0,0'}
+        value={value}
+        onChange={(e) => onChange(sanitizePercentDraft(e.target.value))}
+      />
+      <span className="percent-suffix">%</span>
+    </span>
+  )
+}
+
+/** Aviso não bloqueante: soma dos percentuais preenchidos num grupo (gênero/faixa etária/países/cidades). */
+function SumWarning({ sum, active }: { sum: number; active: boolean }) {
+  if (!active || Math.abs(sum - 100) < 0.05) return null
+  return <p className="state-message state-warning">⚠️ Os percentuais somam {formatPercentBR(sum)}.</p>
 }
 
 interface LocationDraft {
   city: string
   state: string
-  count: string
+  percent: string
+}
+
+interface CountryDraft {
+  country_code: string
+  percent: string
+}
+
+/** Converte um `percent` numérico (vindo da API, decimal com ponto) para o formato de rascunho BR (vírgula) exibido no input. */
+function percentToDraft(value: number): string {
+  return String(value).replace('.', ',')
+}
+
+type ContentDrafts = Record<ContentMetricType, Record<ContentAudienceType, Record<ContentType, string>>>
+
+function emptyContentDrafts(): ContentDrafts {
+  const out = {} as ContentDrafts
+  for (const metricType of CONTENT_METRIC_TYPES) {
+    out[metricType] = {} as Record<ContentAudienceType, Record<ContentType, string>>
+    for (const audienceType of CONTENT_AUDIENCE_TYPES) {
+      out[metricType][audienceType] = {} as Record<ContentType, string>
+      for (const contentType of CONTENT_TYPES) {
+        out[metricType][audienceType][contentType] = ''
+      }
+    }
+  }
+  return out
+}
+
+function metricToContentDrafts(m?: DailyMetric): ContentDrafts {
+  const out = emptyContentDrafts()
+  if (m) {
+    for (const row of m.content_type_metrics) {
+      out[row.metric_type][row.audience_type][row.content_type] = String(row.value)
+    }
+  }
+  return out
+}
+
+type GenderDrafts = Record<FormGender, string>
+
+function emptyGenderDrafts(): GenderDrafts {
+  return { female: '', male: '' }
+}
+
+function metricToGenderDrafts(m?: DailyMetric): GenderDrafts {
+  const out = emptyGenderDrafts()
+  if (m) {
+    for (const row of m.audience.genders) {
+      if (row.gender === 'female' || row.gender === 'male') out[row.gender] = percentToDraft(row.percent)
+    }
+  }
+  return out
+}
+
+type AgeDrafts = Record<string, GenderDrafts>
+
+function emptyAgeDrafts(): AgeDrafts {
+  const out: AgeDrafts = {}
+  for (const range of AGE_RANGES) out[range] = emptyGenderDrafts()
+  return out
+}
+
+function metricToAgeDrafts(m?: DailyMetric): AgeDrafts {
+  const out = emptyAgeDrafts()
+  if (m) {
+    for (const row of m.audience.age_ranges) {
+      if (out[row.age_range] && (row.gender === 'female' || row.gender === 'male')) {
+        out[row.age_range][row.gender] = percentToDraft(row.percent)
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * Ao editar um registro existente, parte das localizações já salvas nele (com os
+ * percentuais). Ao criar um registro novo, parte das cidades do registro mais recente
+ * (`template`) que já tiver localizações — mantendo cidade/UF, mas com o percentual em
+ * branco para o usuário preencher com o valor do novo dia. Sem histórico algum, usa os
+ * defaults atuais.
+ */
+function metricToLocationDrafts(m?: DailyMetric, template?: AudienceLocation[]): LocationDraft[] {
+  if (m && m.audience.locations.length > 0) {
+    return [...m.audience.locations]
+      .sort((a, b) => b.percent - a.percent)
+      .map((l) => ({ city: bareCityName(l.city, l.state), state: l.state ?? '', percent: percentToDraft(l.percent) }))
+  }
+  if (!m && template && template.length > 0) {
+    return [...template]
+      .sort((a, b) => b.percent - a.percent)
+      .map((l) => ({ city: bareCityName(l.city, l.state), state: l.state ?? '', percent: '' }))
+  }
+  return [
+    { city: 'São Paulo', state: 'SP', percent: '' },
+    { city: 'Rio de Janeiro', state: 'RJ', percent: '' },
+    { city: 'Belo Horizonte', state: 'MG', percent: '' },
+  ]
+}
+
+/** Países não herdam de um registro anterior (só cidades, por pedido explícito) — em criação, começa vazio. */
+function metricToCountryDrafts(m?: DailyMetric): CountryDraft[] {
+  if (m) {
+    return [...m.audience.countries]
+      .sort((a, b) => b.percent - a.percent)
+      .map((c) => ({ country_code: c.country_code, percent: percentToDraft(c.percent) }))
+  }
+  return []
 }
 
 type FormValues = {
   date: string
   followers: string
   posts_published: string
+  net_follows: string
   note: string
-} & Record<OptionalIntField, string>
+} & Record<ScalarOptionalField, string>
 
 function emptyFormValues(): FormValues {
-  const base = { date: '', followers: '', posts_published: '', note: '' } as FormValues
-  for (const field of OPTIONAL_INT_FIELDS) base[field] = ''
+  const base = { date: '', followers: '', posts_published: '', net_follows: '', note: '' } as FormValues
+  for (const field of SCALAR_OPTIONAL_FIELDS) base[field] = ''
   return base
 }
 
@@ -216,56 +261,14 @@ function metricToFormValues(m: DailyMetric): FormValues {
     date: m.date.slice(0, 10),
     followers: String(m.followers),
     posts_published: m.posts_published === null ? '' : String(m.posts_published),
+    net_follows: m.net_follows === null ? '' : String(m.net_follows),
     note: m.note ?? '',
   } as FormValues
-  for (const field of OPTIONAL_INT_FIELDS) {
+  for (const field of SCALAR_OPTIONAL_FIELDS) {
     const value = m[field]
     base[field] = value === null || value === undefined ? '' : String(value)
   }
   return base
-}
-
-function metricToAgeDrafts(m?: DailyMetric): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const range of AGE_RANGES) out[range] = ''
-  if (m) {
-    for (const row of m.audience.age_ranges) out[row.age_range] = String(row.followers_count)
-  }
-  return out
-}
-
-function metricToGenderDrafts(m?: DailyMetric): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const gender of GENDERS) out[gender] = ''
-  if (m) {
-    for (const row of m.audience.genders) out[row.gender] = String(row.followers_count)
-  }
-  return out
-}
-
-/**
- * Ao editar um registro existente, parte das localizações já salvas nele (com as
- * quantidades). Ao criar um registro novo, parte das cidades do registro mais recente
- * (`template`) que já tiver localizações — mantendo cidade/UF, mas com a quantidade em
- * branco para o usuário preencher com o valor do novo dia. Sem histórico algum, usa os
- * defaults atuais.
- */
-function metricToLocationDrafts(m?: DailyMetric, template?: DailyMetric['audience']['locations']): LocationDraft[] {
-  if (m && m.audience.locations.length > 0) {
-    return [...m.audience.locations]
-      .sort((a, b) => b.followers_count - a.followers_count)
-      .map((l) => ({ city: bareCityName(l.city, l.state), state: l.state ?? '', count: String(l.followers_count) }))
-  }
-  if (!m && template && template.length > 0) {
-    return [...template]
-      .sort((a, b) => b.followers_count - a.followers_count)
-      .map((l) => ({ city: bareCityName(l.city, l.state), state: l.state ?? '', count: '' }))
-  }
-  return [
-    { city: 'São Paulo', state: 'SP', count: '' },
-    { city: 'Rio de Janeiro', state: 'RJ', count: '' },
-    { city: 'Belo Horizonte', state: 'MG', count: '' },
-  ]
 }
 
 interface MetricFormProps {
@@ -273,7 +276,7 @@ interface MetricFormProps {
   mode: 'create' | 'edit'
   initial?: DailyMetric
   /** Cidades do registro mais recente (com localizações), usadas como base ao criar um novo registro. */
-  templateLocations?: DailyMetric['audience']['locations']
+  templateLocations?: AudienceLocation[]
   submitting: boolean
   error: string | null
   onSubmit: (input: NewMetricInput) => void
@@ -295,19 +298,29 @@ export default function MetricForm({
   deleting,
 }: MetricFormProps) {
   const [values, setValues] = useState<FormValues>(() => (initial ? metricToFormValues(initial) : emptyFormValues()))
-  const [ageDrafts, setAgeDrafts] = useState<Record<string, string>>(() => metricToAgeDrafts(initial))
-  const [genderDrafts, setGenderDrafts] = useState<Record<string, string>>(() => metricToGenderDrafts(initial))
+  const [contentDrafts, setContentDrafts] = useState<ContentDrafts>(() => metricToContentDrafts(initial))
+  const [genderDrafts, setGenderDrafts] = useState<GenderDrafts>(() => metricToGenderDrafts(initial))
+  const [ageDrafts, setAgeDrafts] = useState<AgeDrafts>(() => metricToAgeDrafts(initial))
   const [locationDrafts, setLocationDrafts] = useState<LocationDraft[]>(() => metricToLocationDrafts(initial, templateLocations))
+  const [countryDrafts, setCountryDrafts] = useState<CountryDraft[]>(() => metricToCountryDrafts(initial))
   const [fieldError, setFieldError] = useState<string | null>(null)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [confirmingRemoveLocation, setConfirmingRemoveLocation] = useState<number | null>(null)
+  const [confirmingRemoveCountry, setConfirmingRemoveCountry] = useState<number | null>(null)
 
-  function setField(field: OptionalIntField, raw: string) {
+  function setField(field: ScalarOptionalField, raw: string) {
     setValues((v) => ({ ...v, [field]: raw }))
   }
 
+  function setContentDraft(metricType: ContentMetricType, audienceType: ContentAudienceType, contentType: ContentType, raw: string) {
+    setContentDrafts((d) => ({
+      ...d,
+      [metricType]: { ...d[metricType], [audienceType]: { ...d[metricType][audienceType], [contentType]: raw } },
+    }))
+  }
+
   function addLocationRow() {
-    setLocationDrafts((rows) => [...rows, { city: '', state: '', count: '' }])
+    setLocationDrafts((rows) => [...rows, { city: '', state: '', percent: '' }])
   }
   function removeLocationRow(index: number) {
     setLocationDrafts((rows) => rows.filter((_, i) => i !== index))
@@ -317,17 +330,35 @@ export default function MetricForm({
     setLocationDrafts((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
   }
 
-  const genderTotal = GENDERS.reduce((sum, g) => {
-    const parsed = parseOptionalInt(genderDrafts[g] ?? '')
-    return sum + (typeof parsed === 'number' ? parsed : 0)
-  }, 0)
-  const ageTotal = AGE_RANGES.reduce((sum, r) => {
-    const parsed = parseOptionalInt(ageDrafts[r] ?? '')
-    return sum + (typeof parsed === 'number' ? parsed : 0)
-  }, 0)
+  function addCountryRow() {
+    setCountryDrafts((rows) => [...rows, { country_code: '', percent: '' }])
+  }
+  function removeCountryRow(index: number) {
+    setCountryDrafts((rows) => rows.filter((_, i) => i !== index))
+    setConfirmingRemoveCountry(null)
+  }
+  function updateCountryRow(index: number, patch: Partial<CountryDraft>) {
+    setCountryDrafts((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+  }
 
-  const parsedFollowersTotal = parseOptionalInt(values.followers)
-  const followersTotal = typeof parsedFollowersTotal === 'number' ? parsedFollowersTotal : null
+  function sumPercent(values: string[]): { sum: number; active: boolean } {
+    let sum = 0
+    let active = false
+    for (const raw of values) {
+      if (raw.trim() === '') continue
+      const parsed = parseOptionalPercentBR(raw)
+      if (typeof parsed === 'number') {
+        sum += parsed
+        active = true
+      }
+    }
+    return { sum, active }
+  }
+
+  const genderSum = sumPercent(FORM_GENDERS.map((g) => genderDrafts[g]))
+  const ageSum = sumPercent(AGE_RANGES.flatMap((range) => FORM_GENDERS.map((g) => ageDrafts[range][g])))
+  const countrySum = sumPercent(countryDrafts.map((c) => c.percent))
+  const citySum = sumPercent(locationDrafts.map((c) => c.percent))
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -339,7 +370,7 @@ export default function MetricForm({
     }
     const followers = parseRequiredInt(values.followers)
     if (followers === 'invalid') {
-      setFieldError('Seguidores deve ser um número inteiro maior ou igual a 0.')
+      setFieldError('Seguidores totais deve ser um número inteiro maior ou igual a 0.')
       return
     }
     const postsPublished = parseOptionalInt(values.posts_published)
@@ -347,118 +378,171 @@ export default function MetricForm({
       setFieldError('Posts deve ser um número inteiro maior ou igual a 0.')
       return
     }
-
-    const parsedOptional: Partial<Record<OptionalIntField, number | null>> = {}
-    for (const field of OPTIONAL_INT_FIELDS) {
-      const parsed = parseOptionalInt(values[field])
-      if (parsed === 'invalid') {
-        setFieldError(`${FIELD_LABELS[field]} deve ser um número inteiro maior ou igual a 0.`)
-        return
-      }
-      parsedOptional[field] = parsed
+    const netFollows = parseOptionalSignedInt(values.net_follows)
+    if (netFollows === 'invalid') {
+      setFieldError('Seguidores líquidos deve ser um número inteiro (pode ser negativo).')
+      return
     }
 
-    const locations: { city: string; state: string; followers_count: number }[] = []
+    const parsedScalars: Partial<Record<ScalarOptionalField, number | null>> = {}
+    for (const field of SCALAR_OPTIONAL_FIELDS) {
+      const parsed = parseOptionalInt(values[field])
+      if (parsed === 'invalid') {
+        setFieldError(`${SCALAR_FIELD_LABELS[field]} deve ser um número inteiro maior ou igual a 0.`)
+        return
+      }
+      parsedScalars[field] = parsed
+    }
+
+    const contentTypeMetrics: ContentTypeMetric[] = []
+    for (const group of CONTENT_GROUPS) {
+      for (const audienceType of CONTENT_AUDIENCE_TYPES) {
+        for (const contentType of CONTENT_TYPES) {
+          const raw = contentDrafts[group.metricType][audienceType][contentType]
+          const parsed = parseOptionalInt(raw)
+          if (parsed === 'invalid') {
+            const audienceLabel = audienceType === 'followers' ? 'seguidores' : 'não seguidores'
+            setFieldError(`${group.title} (${audienceLabel} / ${CONTENT_TYPE_LABELS[contentType]}) deve ser um número inteiro maior ou igual a 0.`)
+            return
+          }
+          if (parsed !== null) {
+            contentTypeMetrics.push({ metric_type: group.metricType, audience_type: audienceType, content_type: contentType, value: parsed })
+          }
+        }
+      }
+    }
+
+    const genders: { gender: string; percent: number }[] = []
+    for (const gender of FORM_GENDERS) {
+      const parsed = parseOptionalPercentBR(genderDrafts[gender])
+      if (parsed === 'invalid') {
+        setFieldError(`Percentual inválido em "${FORM_GENDER_LABELS[gender]}" (gênero). Use vírgula decimal, entre 0 e 100.`)
+        return
+      }
+      if (parsed !== null) genders.push({ gender, percent: parsed })
+    }
+
+    const ageRanges: { age_range: string; gender: string; percent: number }[] = []
+    for (const range of AGE_RANGES) {
+      for (const gender of FORM_GENDERS) {
+        const parsed = parseOptionalPercentBR(ageDrafts[range][gender])
+        if (parsed === 'invalid') {
+          setFieldError(`Percentual inválido na faixa etária ${range} (${FORM_GENDER_LABELS[gender]}). Use vírgula decimal, entre 0 e 100.`)
+          return
+        }
+        if (parsed !== null) ageRanges.push({ age_range: range, gender, percent: parsed })
+      }
+    }
+
+    const locations: { city: string; state: string; percent: number }[] = []
     for (const row of locationDrafts) {
       const cityBlank = row.city.trim() === ''
       const stateBlank = row.state.trim() === ''
-      const countBlank = row.count.trim() === ''
-      if (cityBlank && stateBlank && countBlank) continue
+      const percentBlank = row.percent.trim() === ''
+      if (cityBlank && stateBlank && percentBlank) continue
       if (cityBlank) {
         setFieldError('Informe o nome da cidade ou deixe a linha vazia.')
         return
       }
-      const count = parseOptionalInt(row.count)
-      if (count === 'invalid') {
-        setFieldError(`Quantidade inválida para a cidade ${row.city}.`)
+      const percent = parseOptionalPercentBR(row.percent)
+      if (percent === 'invalid') {
+        setFieldError(`Percentual inválido para a cidade ${row.city}. Use vírgula decimal, entre 0 e 100.`)
         return
       }
-      if (count === null) continue
+      if (percent === null) continue
       if (stateBlank) {
         setFieldError(`Selecione o estado (UF) da cidade ${row.city.trim()}.`)
         return
       }
-      locations.push({ city: row.city.trim(), state: row.state.trim(), followers_count: count })
+      locations.push({ city: row.city.trim(), state: row.state.trim(), percent })
     }
 
-    const ageRanges: { age_range: string; followers_count: number }[] = []
-    for (const range of AGE_RANGES) {
-      const count = parseOptionalInt(ageDrafts[range] ?? '')
-      if (count === 'invalid') {
-        setFieldError(`Quantidade inválida para a faixa etária ${range}.`)
+    const countries: { country_code: string; country_name: string; percent: number }[] = []
+    for (const row of countryDrafts) {
+      const codeBlank = row.country_code.trim() === ''
+      const percentBlank = row.percent.trim() === ''
+      if (codeBlank && percentBlank) continue
+      if (codeBlank) {
+        setFieldError('Selecione o país ou deixe a linha vazia.')
         return
       }
-      if (count !== null) ageRanges.push({ age_range: range, followers_count: count })
-    }
-
-    const genders: { gender: string; followers_count: number }[] = []
-    for (const gender of GENDERS) {
-      const count = parseOptionalInt(genderDrafts[gender] ?? '')
-      if (count === 'invalid') {
-        setFieldError(`Quantidade inválida para o gênero ${GENDER_LABELS[gender]}.`)
+      const percent = parseOptionalPercentBR(row.percent)
+      if (percent === 'invalid') {
+        setFieldError(`Percentual inválido para o país ${COUNTRY_LABEL_BY_ALPHA2[row.country_code] ?? row.country_code}. Use vírgula decimal, entre 0 e 100.`)
         return
       }
-      if (count !== null) genders.push({ gender, followers_count: count })
+      if (percent === null) continue
+      countries.push({
+        country_code: row.country_code,
+        country_name: COUNTRY_LABEL_BY_ALPHA2[row.country_code] ?? row.country_code,
+        percent,
+      })
     }
 
     onSubmit({
       account_id: accountId,
       date: values.date,
       followers,
+      net_follows: netFollows,
       posts_published: postsPublished,
       note: values.note.trim() === '' ? null : values.note.trim(),
-      interactions: parsedOptional.interactions ?? null,
-      profile_visits: parsedOptional.profile_visits ?? null,
-      views_total: parsedOptional.views_total ?? null,
-      views_from_followers: parsedOptional.views_from_followers ?? null,
-      views_from_non_followers: parsedOptional.views_from_non_followers ?? null,
-      viewers_total: parsedOptional.viewers_total ?? null,
-      views_stories_followers: parsedOptional.views_stories_followers ?? null,
-      views_stories_non_followers: parsedOptional.views_stories_non_followers ?? null,
-      views_posts_followers: parsedOptional.views_posts_followers ?? null,
-      views_posts_non_followers: parsedOptional.views_posts_non_followers ?? null,
-      views_reels_followers: parsedOptional.views_reels_followers ?? null,
-      views_reels_non_followers: parsedOptional.views_reels_non_followers ?? null,
-      interactions_from_followers: parsedOptional.interactions_from_followers ?? null,
-      interactions_from_non_followers: parsedOptional.interactions_from_non_followers ?? null,
-      interactions_stories_followers: parsedOptional.interactions_stories_followers ?? null,
-      interactions_stories_non_followers: parsedOptional.interactions_stories_non_followers ?? null,
-      interactions_posts_followers: parsedOptional.interactions_posts_followers ?? null,
-      interactions_posts_non_followers: parsedOptional.interactions_posts_non_followers ?? null,
-      replies: parsedOptional.replies ?? null,
-      shares: parsedOptional.shares ?? null,
-      likes: parsedOptional.likes ?? null,
-      comments: parsedOptional.comments ?? null,
-      audience: { locations, age_ranges: ageRanges, genders },
+      views_total: parsedScalars.views_total ?? null,
+      viewers_total: parsedScalars.viewers_total ?? null,
+      views_from_followers: parsedScalars.views_from_followers ?? null,
+      views_from_non_followers: parsedScalars.views_from_non_followers ?? null,
+      interactions: parsedScalars.interactions ?? null,
+      interactions_from_followers: parsedScalars.interactions_from_followers ?? null,
+      interactions_from_non_followers: parsedScalars.interactions_from_non_followers ?? null,
+      profile_visits: parsedScalars.profile_visits ?? null,
+      bio_link_taps: parsedScalars.bio_link_taps ?? null,
+      content_type_metrics: contentTypeMetrics,
+      audience: { locations, age_ranges: ageRanges, genders, countries },
     })
   }
 
-  function numberField(field: OptionalIntField) {
+  function scalarField(field: ScalarOptionalField) {
     return (
       <label key={field}>
-        {FIELD_LABELS[field]}
+        {SCALAR_FIELD_LABELS[field]}
         <IntegerTextInput placeholder="indisponível" value={values[field]} onChange={(digits) => setField(field, digits)} />
       </label>
     )
   }
 
-  /** Campo de quantidade que também aceita "12,5" como 12,5% de `totalField`. */
-  function percentField(field: OptionalIntField, totalField: OptionalIntField) {
-    const parsedTotal = parseOptionalInt(values[totalField])
-    const total = typeof parsedTotal === 'number' ? parsedTotal : null
+  function contentGroup(group: (typeof CONTENT_GROUPS)[number]) {
     return (
-      <label key={field}>
-        {FIELD_LABELS[field]}
-        <PercentAwareIntegerInput
-          placeholder="indisponível"
-          value={values[field]}
-          onChange={(digits) => setField(field, digits)}
-          total={total}
-          totalLabel={FIELD_LABELS[totalField]}
-          fieldLabel={FIELD_LABELS[field]}
-          onFieldError={setFieldError}
-        />
-      </label>
+      <fieldset key={group.metricType} className="content-group">
+        <legend>{group.title}</legend>
+        {group.showTudo && <div className="content-group-tudo">Tudo</div>}
+        <div className="two-col-audience">
+          <div className="audience-col">
+            <span className="audience-col-title">Seguidores</span>
+            {CONTENT_TYPES.map((ct) => (
+              <label key={ct}>
+                {CONTENT_TYPE_LABELS[ct]}
+                <IntegerTextInput
+                  placeholder="indisponível"
+                  value={contentDrafts[group.metricType].followers[ct]}
+                  onChange={(digits) => setContentDraft(group.metricType, 'followers', ct, digits)}
+                />
+              </label>
+            ))}
+          </div>
+          <div className="audience-col">
+            <span className="audience-col-title">Não seguidores</span>
+            {CONTENT_TYPES.map((ct) => (
+              <label key={ct}>
+                {CONTENT_TYPE_LABELS[ct]}
+                <IntegerTextInput
+                  placeholder="indisponível"
+                  value={contentDrafts[group.metricType].non_followers[ct]}
+                  onChange={(digits) => setContentDraft(group.metricType, 'non_followers', ct, digits)}
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+      </fieldset>
     )
   }
 
@@ -473,11 +557,7 @@ export default function MetricForm({
           </label>
           <label>
             Seguidores totais
-            <IntegerTextInput
-              required
-              value={values.followers}
-              onChange={(digits) => setValues((v) => ({ ...v, followers: digits }))}
-            />
+            <IntegerTextInput required value={values.followers} onChange={(digits) => setValues((v) => ({ ...v, followers: digits }))} />
           </label>
           <label>
             Posts
@@ -490,75 +570,108 @@ export default function MetricForm({
         </div>
       </fieldset>
 
-      <fieldset className="card-visualizacoes">
-        <legend>Visualizações</legend>
+      <fieldset>
+        <legend>Métricas principais</legend>
         <div className="field-grid">
-          {numberField('views_total')}
-          {numberField('viewers_total')}
-          {percentField('views_from_followers', 'views_total')}
-          {percentField('views_from_non_followers', 'views_total')}
+          {scalarField('views_total')}
+          <label>
+            Seguidores líquidos
+            <SignedIntegerTextInput placeholder="ex.: -1.250" value={values.net_follows} onChange={(digits) => setValues((v) => ({ ...v, net_follows: digits }))} />
+          </label>
+          {scalarField('interactions')}
+          {scalarField('profile_visits')}
+          {scalarField('bio_link_taps')}
         </div>
-
-        <h4>Por tipo de conteúdo</h4>
-        <div className="two-col-audience">
-          <div className="audience-col">
-            <span className="audience-col-title">Seguidores</span>
-            {percentField('views_stories_followers', 'views_from_followers')}
-            {percentField('views_posts_followers', 'views_from_followers')}
-            {percentField('views_reels_followers', 'views_from_followers')}
-          </div>
-          <div className="audience-col">
-            <span className="audience-col-title">Não seguidores</span>
-            {percentField('views_stories_non_followers', 'views_from_non_followers')}
-            {percentField('views_posts_non_followers', 'views_from_non_followers')}
-            {percentField('views_reels_non_followers', 'views_from_non_followers')}
-          </div>
-        </div>
-
-        <div className="field-grid">{numberField('profile_visits')}</div>
-      </fieldset>
-
-      <fieldset className="card-interacoes">
-        <legend>Interações</legend>
+        <h4>Detalhamento agregado (opcional)</h4>
         <div className="field-grid">
-          {numberField('interactions')}
-          {percentField('interactions_from_followers', 'interactions')}
-          {percentField('interactions_from_non_followers', 'interactions')}
-        </div>
-
-        <h4>Por tipo de conteúdo</h4>
-        <div className="two-col-audience">
-          <div className="audience-col">
-            <span className="audience-col-title">Seguidores</span>
-            {percentField('interactions_stories_followers', 'interactions_from_followers')}
-            {percentField('interactions_posts_followers', 'interactions_from_followers')}
-          </div>
-          <div className="audience-col">
-            <span className="audience-col-title">Não seguidores</span>
-            {percentField('interactions_stories_non_followers', 'interactions_from_non_followers')}
-            {percentField('interactions_posts_non_followers', 'interactions_from_non_followers')}
-          </div>
+          {scalarField('viewers_total')}
+          {scalarField('views_from_followers')}
+          {scalarField('views_from_non_followers')}
+          {scalarField('interactions_from_followers')}
+          {scalarField('interactions_from_non_followers')}
         </div>
       </fieldset>
 
-      <div className="por-interacao">
-        <h4>Por interação</h4>
-        <div className="two-col-audience">
-          <fieldset className="sub-card">
-            <legend>Stories</legend>
-            {numberField('replies')}
-            {numberField('shares')}
-          </fieldset>
-          <fieldset className="sub-card">
-            <legend>Posts</legend>
-            {numberField('likes')}
-            {numberField('comments')}
-          </fieldset>
-        </div>
-      </div>
+      {CONTENT_GROUPS.map(contentGroup)}
 
       <fieldset>
-        <legend>Audiência — localização</legend>
+        <legend>Gênero</legend>
+        <div className="field-grid">
+          {FORM_GENDERS.map((gender) => (
+            <label key={gender}>
+              {FORM_GENDER_LABELS[gender]}
+              <PercentInput value={genderDrafts[gender]} onChange={(raw) => setGenderDrafts((d) => ({ ...d, [gender]: raw }))} />
+            </label>
+          ))}
+        </div>
+        <SumWarning sum={genderSum.sum} active={genderSum.active} />
+      </fieldset>
+
+      <fieldset>
+        <legend>Faixa etária</legend>
+        <div className="age-range-grid">
+          {AGE_RANGES.map((range) => (
+            <div className="age-range-row" key={range}>
+              <span className="age-range-label">{range}</span>
+              {FORM_GENDERS.map((gender) => (
+                <label key={gender}>
+                  {FORM_GENDER_LABELS[gender]}
+                  <PercentInput
+                    value={ageDrafts[range][gender]}
+                    onChange={(raw) => setAgeDrafts((d) => ({ ...d, [range]: { ...d[range], [gender]: raw } }))}
+                  />
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+        <SumWarning sum={ageSum.sum} active={ageSum.active} />
+      </fieldset>
+
+      <fieldset>
+        <legend>Países (%)</legend>
+        <div className="audience-locations">
+          {countryDrafts.map((row, i) => (
+            <div className="country-row" key={i}>
+              <select
+                value={row.country_code}
+                onChange={(e) => updateCountryRow(i, { country_code: e.target.value })}
+                aria-label="País"
+              >
+                <option value="">País</option>
+                {COMMON_COUNTRIES.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+              <PercentInput value={row.percent} onChange={(raw) => updateCountryRow(i, { percent: raw })} />
+              {confirmingRemoveCountry === i ? (
+                <span className="confirm-delete">
+                  Remover?
+                  <button type="button" className="danger" onClick={() => removeCountryRow(i)}>
+                    Sim
+                  </button>
+                  <button type="button" onClick={() => setConfirmingRemoveCountry(null)}>
+                    Não
+                  </button>
+                </span>
+              ) : (
+                <button type="button" onClick={() => setConfirmingRemoveCountry(i)} aria-label="Remover país">
+                  Remover
+                </button>
+              )}
+            </div>
+          ))}
+          <button type="button" onClick={addCountryRow}>
+            + Adicionar país
+          </button>
+        </div>
+        <SumWarning sum={countrySum.sum} active={countrySum.active} />
+      </fieldset>
+
+      <fieldset>
+        <legend>Cidades (%)</legend>
         <div className="audience-locations">
           {locationDrafts.map((row, i) => (
             <div className="location-row" key={i}>
@@ -580,15 +693,7 @@ export default function MetricForm({
                   </option>
                 ))}
               </select>
-              <PercentAwareIntegerInput
-                placeholder="Seguidores"
-                value={row.count}
-                onChange={(digits) => updateLocationRow(i, { count: digits })}
-                total={followersTotal}
-                totalLabel="Seguidores totais"
-                fieldLabel={row.city.trim() ? `Localização (${row.city.trim()})` : 'Localização'}
-                onFieldError={setFieldError}
-              />
+              <PercentInput value={row.percent} onChange={(raw) => updateLocationRow(i, { percent: raw })} />
               {confirmingRemoveLocation === i ? (
                 <span className="confirm-delete">
                   Remover?
@@ -614,56 +719,7 @@ export default function MetricForm({
             + Adicionar cidade
           </button>
         </div>
-      </fieldset>
-
-      <fieldset>
-        <legend>Audiência — faixa etária</legend>
-        <div className="field-grid">
-          {AGE_RANGES.map((range) => {
-            const parsed = parseOptionalInt(ageDrafts[range] ?? '')
-            const count = typeof parsed === 'number' ? parsed : 0
-            return (
-              <label key={range}>
-                {range}
-                <PercentAwareIntegerInput
-                  placeholder="indisponível"
-                  value={ageDrafts[range] ?? ''}
-                  onChange={(digits) => setAgeDrafts((d) => ({ ...d, [range]: digits }))}
-                  total={followersTotal}
-                  totalLabel="Seguidores totais"
-                  fieldLabel={`Faixa etária ${range}`}
-                  onFieldError={setFieldError}
-                />
-                <span className="field-percent">{ageDrafts[range] ? formatPercentBR(percentage(count, ageTotal)) : ''}</span>
-              </label>
-            )
-          })}
-        </div>
-      </fieldset>
-
-      <fieldset>
-        <legend>Audiência — gênero</legend>
-        <div className="field-grid">
-          {GENDERS.map((gender) => {
-            const parsed = parseOptionalInt(genderDrafts[gender] ?? '')
-            const count = typeof parsed === 'number' ? parsed : 0
-            return (
-              <label key={gender}>
-                {GENDER_LABELS[gender]}
-                <PercentAwareIntegerInput
-                  placeholder="indisponível"
-                  value={genderDrafts[gender] ?? ''}
-                  onChange={(digits) => setGenderDrafts((d) => ({ ...d, [gender]: digits }))}
-                  total={followersTotal}
-                  totalLabel="Seguidores totais"
-                  fieldLabel={`Gênero ${GENDER_LABELS[gender]}`}
-                  onFieldError={setFieldError}
-                />
-                <span className="field-percent">{genderDrafts[gender] ? formatPercentBR(percentage(count, genderTotal)) : ''}</span>
-              </label>
-            )
-          })}
-        </div>
+        <SumWarning sum={citySum.sum} active={citySum.active} />
       </fieldset>
 
       <fieldset>

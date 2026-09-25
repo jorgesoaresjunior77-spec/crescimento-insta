@@ -46,6 +46,15 @@
   }
 }
 
+/* Aviso não bloqueante (ex.: percentuais de um grupo não somam 100%) — nunca impede salvar. */
+.state-warning {
+  padding: 8px 12px;
+  border-color: rgba(250, 204, 21, 0.4);
+  background: rgba(250, 204, 21, 0.08);
+  color: #facc15;
+  font-size: 13px;
+}
+
 .chart-empty {
   font-size: 13px;
 }
@@ -307,6 +316,91 @@
   width: 100%;
 }
 
+/* ---------- Mapas de audiência (Brasil + Mundo) ---------- */
+.maps-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.audience-map-body {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.audience-map-visual {
+  flex: 1 1 60%;
+  min-width: 0;
+}
+
+.audience-map-panel {
+  flex: 0 0 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 140px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  font-size: 13px;
+}
+
+.audience-map-panel-title {
+  color: var(--text-h);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.audience-map-panel-empty {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.audience-map-panel-single {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.audience-map-panel-table {
+  border-collapse: collapse;
+  width: 100%;
+
+  td {
+    padding: 3px 0;
+    color: var(--text-h);
+    white-space: nowrap;
+  }
+
+  td.num,
+  td.pct {
+    text-align: right;
+    padding-left: 8px;
+  }
+
+  td.pct {
+    color: var(--text);
+  }
+}
+
+@media (max-width: 900px) {
+  .maps-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .audience-map-body {
+    flex-direction: column;
+  }
+  .audience-map-panel {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+}
+
 /* ---------- Formulário ---------- */
 .metric-form-v2 {
   display: flex;
@@ -396,30 +490,111 @@
   color: var(--accent);
 }
 
-.por-interacao {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 16px 16px;
-  background: var(--bg-elevated);
-}
-
-.sub-card {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px;
-  background: var(--card-bg);
-}
-
-.field-hint {
-  font-size: 12px;
-  color: #facc15;
-  margin: 4px 0 0;
-}
-
-.field-percent {
+.content-group-tudo {
+  display: inline-block;
   font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 10px;
+  margin-bottom: 10px;
+}
+
+/* Campo percentual nativo: input + sufixo "%" fixo ao lado (nunca dentro do valor digitado). */
+.percent-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.percent-field input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.percent-suffix {
+  font-size: 12px;
+  font-weight: 700;
   color: var(--accent);
-  font-weight: 600;
+}
+
+.age-range-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.age-range-row {
+  display: grid;
+  grid-template-columns: 56px 1fr 1fr;
+  gap: 10px;
+  align-items: end;
+
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr 1fr;
+
+    .age-range-label {
+      grid-column: 1 / -1;
+    }
+  }
+}
+
+.age-range-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-h);
+}
+
+/* Mesmo padrão de .location-row, com uma coluna a menos (sem UF). */
+.country-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1.6fr) minmax(96px, 140px) minmax(76px, auto);
+  gap: 6px;
+  align-items: center;
+
+  select {
+    font: inherit;
+    font-size: 13px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    color: var(--text-h);
+    width: 100%;
+    box-sizing: border-box;
+
+    &:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
+  }
+
+  input {
+    font-size: 13px;
+    padding: 6px 8px;
+  }
+
+  button {
+    font: inherit;
+    font-size: 12px;
+    padding: 6px 10px;
+    min-height: 32px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text-h);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr;
+  }
 }
 
 .audience-locations {

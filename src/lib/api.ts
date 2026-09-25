@@ -5,17 +5,34 @@ export interface Account {
   created_at: string
 }
 
+export const CONTENT_METRIC_TYPES = ['views', 'interactions', 'likes', 'comments', 'reposts', 'shares', 'saves', 'replies'] as const
+export type ContentMetricType = (typeof CONTENT_METRIC_TYPES)[number]
+
+export const CONTENT_AUDIENCE_TYPES = ['followers', 'non_followers'] as const
+export type ContentAudienceType = (typeof CONTENT_AUDIENCE_TYPES)[number]
+
+export const CONTENT_TYPES = ['reels', 'posts', 'stories'] as const
+export type ContentType = (typeof CONTENT_TYPES)[number]
+
+/** Uma combinação (metric_type, audience_type, content_type) -> value de `content_type_metrics`. */
+export interface ContentTypeMetric {
+  metric_type: ContentMetricType
+  audience_type: ContentAudienceType
+  content_type: ContentType
+  value: number
+}
+
 export interface AudienceLocation {
   city: string
   state: string | null
   city_id: string | null
-  followers_count: number
+  percent: number
 }
 
 export interface AudienceLocationInput {
   city: string
   state: string
-  followers_count: number
+  percent: number
 }
 
 export interface BrazilStateOption {
@@ -55,24 +72,33 @@ export const BRAZIL_STATES: BrazilStateOption[] = [
 
 export interface AudienceAgeRange {
   age_range: string
-  followers_count: number
+  gender: string
+  percent: number
 }
 
 export interface AudienceGender {
   gender: string
-  followers_count: number
+  percent: number
+}
+
+export interface AudienceCountry {
+  country_code: string
+  country_name: string
+  percent: number
 }
 
 export interface Audience {
   locations: AudienceLocation[]
   age_ranges: AudienceAgeRange[]
   genders: AudienceGender[]
+  countries: AudienceCountry[]
 }
 
 export interface AudienceInput {
   locations?: AudienceLocationInput[]
   age_ranges?: AudienceAgeRange[]
   genders?: AudienceGender[]
+  countries?: AudienceCountry[]
 }
 
 export interface DailyMetric {
@@ -80,32 +106,21 @@ export interface DailyMetric {
   account_id: string
   date: string
   followers: number
+  net_follows: number | null
   reach: number | null
   interactions: number | null
   profile_visits: number | null
   posts_published: number | null
+  bio_link_taps: number | null
   note: string | null
   created_at: string
   views_total: number | null
   views_from_followers: number | null
   views_from_non_followers: number | null
   viewers_total: number | null
-  views_stories_followers: number | null
-  views_stories_non_followers: number | null
-  views_posts_followers: number | null
-  views_posts_non_followers: number | null
-  views_reels_followers: number | null
-  views_reels_non_followers: number | null
   interactions_from_followers: number | null
   interactions_from_non_followers: number | null
-  interactions_stories_followers: number | null
-  interactions_stories_non_followers: number | null
-  interactions_posts_followers: number | null
-  interactions_posts_non_followers: number | null
-  replies: number | null
-  shares: number | null
-  likes: number | null
-  comments: number | null
+  content_type_metrics: ContentTypeMetric[]
   audience: Audience
 }
 
@@ -139,31 +154,20 @@ export interface NewMetricInput {
   account_id: string
   date: string
   followers: number
+  net_follows?: number | null
   reach?: number | null
   interactions?: number | null
   profile_visits?: number | null
   posts_published?: number | null
+  bio_link_taps?: number | null
   note?: string | null
   views_total?: number | null
   views_from_followers?: number | null
   views_from_non_followers?: number | null
   viewers_total?: number | null
-  views_stories_followers?: number | null
-  views_stories_non_followers?: number | null
-  views_posts_followers?: number | null
-  views_posts_non_followers?: number | null
-  views_reels_followers?: number | null
-  views_reels_non_followers?: number | null
   interactions_from_followers?: number | null
   interactions_from_non_followers?: number | null
-  interactions_stories_followers?: number | null
-  interactions_stories_non_followers?: number | null
-  interactions_posts_followers?: number | null
-  interactions_posts_non_followers?: number | null
-  replies?: number | null
-  shares?: number | null
-  likes?: number | null
-  comments?: number | null
+  content_type_metrics?: ContentTypeMetric[]
   audience?: AudienceInput
 }
 
@@ -172,31 +176,20 @@ export type MetricPatchInput = Partial<
     NewMetricInput,
     | 'date'
     | 'followers'
+    | 'net_follows'
     | 'reach'
     | 'interactions'
     | 'profile_visits'
     | 'posts_published'
+    | 'bio_link_taps'
     | 'note'
     | 'views_total'
     | 'views_from_followers'
     | 'views_from_non_followers'
     | 'viewers_total'
-    | 'views_stories_followers'
-    | 'views_stories_non_followers'
-    | 'views_posts_followers'
-    | 'views_posts_non_followers'
-    | 'views_reels_followers'
-    | 'views_reels_non_followers'
     | 'interactions_from_followers'
     | 'interactions_from_non_followers'
-    | 'interactions_stories_followers'
-    | 'interactions_stories_non_followers'
-    | 'interactions_posts_followers'
-    | 'interactions_posts_non_followers'
-    | 'replies'
-    | 'shares'
-    | 'likes'
-    | 'comments'
+    | 'content_type_metrics'
     | 'audience'
   >
 >

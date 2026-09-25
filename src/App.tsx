@@ -24,6 +24,7 @@ import MetricForm from './components/MetricForm'
 import GrowthCharts from './components/GrowthCharts'
 import GoalCard from './components/GoalCard'
 import BrazilAudienceMap from './components/BrazilAudienceMap'
+import WorldAudienceMap from './components/WorldAudienceMap'
 
 type LoadState<T> =
   | { status: 'loading' }
@@ -107,8 +108,8 @@ function App() {
   const mapLocations = useMemo<DailyMetric['audience']['locations']>(() => {
     // Mesma referência temporal do card "Principais cidades" (GrowthCharts.tsx): o registro
     // mais recente do período que tenha localizações, não a soma de todos os registros —
-    // followers_count por localização é um snapshot, não um incremento diário. A agregação
-    // por estado (e o detalhamento por cidade do tooltip) é feita dentro de BrazilAudienceMap.
+    // percent por localização é um snapshot, não um incremento diário. A agregação por
+    // estado (e o detalhamento por cidade do tooltip) é feita dentro de BrazilAudienceMap.
     for (let i = filteredMetrics.length - 1; i >= 0; i--) {
       if (filteredMetrics[i].audience.locations.length > 0) {
         return filteredMetrics[i].audience.locations
@@ -127,6 +128,17 @@ function App() {
     }
     return []
   }, [sortedMetrics])
+
+  const mapCountries = useMemo<DailyMetric['audience']['countries']>(() => {
+    // Mesma lógica temporal de mapLocations, aplicada a países: registro mais recente do
+    // período que tenha países cadastrados — nunca mock, nunca soma de múltiplos dias.
+    for (let i = filteredMetrics.length - 1; i >= 0; i--) {
+      if (filteredMetrics[i].audience.countries.length > 0) {
+        return filteredMetrics[i].audience.countries
+      }
+    }
+    return []
+  }, [filteredMetrics])
 
   function handleCreateSubmit(input: NewMetricInput) {
     setCreateStatus('saving')
@@ -148,30 +160,19 @@ function App() {
     updateMetric(id, {
       date: input.date,
       followers: input.followers,
+      net_follows: input.net_follows,
       posts_published: input.posts_published,
       note: input.note,
       interactions: input.interactions,
       profile_visits: input.profile_visits,
+      bio_link_taps: input.bio_link_taps,
       views_total: input.views_total,
       views_from_followers: input.views_from_followers,
       views_from_non_followers: input.views_from_non_followers,
       viewers_total: input.viewers_total,
-      views_stories_followers: input.views_stories_followers,
-      views_stories_non_followers: input.views_stories_non_followers,
-      views_posts_followers: input.views_posts_followers,
-      views_posts_non_followers: input.views_posts_non_followers,
-      views_reels_followers: input.views_reels_followers,
-      views_reels_non_followers: input.views_reels_non_followers,
       interactions_from_followers: input.interactions_from_followers,
       interactions_from_non_followers: input.interactions_from_non_followers,
-      interactions_stories_followers: input.interactions_stories_followers,
-      interactions_stories_non_followers: input.interactions_stories_non_followers,
-      interactions_posts_followers: input.interactions_posts_followers,
-      interactions_posts_non_followers: input.interactions_posts_non_followers,
-      replies: input.replies,
-      shares: input.shares,
-      likes: input.likes,
-      comments: input.comments,
+      content_type_metrics: input.content_type_metrics,
       audience: input.audience,
     })
       .then(() => {
@@ -257,15 +258,25 @@ function App() {
 
       {selectedAccount && metricsState.status === 'ready' && (
         <section className="charts-section">
-          <h2>Seguidores por estado</h2>
-          <div className="chart-card">
-            <h3>Mapa do Brasil</h3>
+          <h2>Distribuição geográfica</h2>
+          <div className="maps-row">
             {mapLocations.length === 0 ? (
-              <p className="state-message chart-empty">
-                Sem dados suficientes ainda. Cadastre localizações com UF para ver o mapa.
-              </p>
+              <div className="chart-card audience-map-card">
+                <h3>Mapa do Brasil</h3>
+                <p className="state-message chart-empty">
+                  Sem dados suficientes ainda. Cadastre localizações com UF para ver o mapa.
+                </p>
+              </div>
             ) : (
               <BrazilAudienceMap locations={mapLocations} />
+            )}
+            {mapCountries.length === 0 ? (
+              <div className="chart-card audience-map-card">
+                <h3>Mapa Mundi</h3>
+                <p className="state-message chart-empty">Sem dados suficientes ainda. Cadastre países para ver o mapa.</p>
+              </div>
+            ) : (
+              <WorldAudienceMap countries={mapCountries} />
             )}
           </div>
         </section>
@@ -311,11 +322,11 @@ function App() {
                 <tr>
                   <th>Data</th>
                   <th>Seguidores</th>
-                  <th>Posts</th>
+                  <th>Seg. líquidos</th>
                   <th>Visualizações</th>
                   <th>Interações</th>
-                  <th>Curtidas</th>
-                  <th>Comentários</th>
+                  <th>Visitas perfil</th>
+                  <th>Link bio</th>
                   <th></th>
                 </tr>
               </thead>
@@ -344,11 +355,11 @@ function App() {
                     <tr key={m.id}>
                       <td>{formatCalendarDateBR(m.date)}</td>
                       <td>{formatNumber(m.followers)}</td>
-                      <td>{formatNumber(m.posts_published)}</td>
+                      <td>{m.net_follows === null ? 'indisponível' : `${m.net_follows > 0 ? '+' : ''}${formatNumber(m.net_follows)}`}</td>
                       <td>{formatNumber(m.views_total)}</td>
                       <td>{formatNumber(m.interactions)}</td>
-                      <td>{formatNumber(m.likes)}</td>
-                      <td>{formatNumber(m.comments)}</td>
+                      <td>{formatNumber(m.profile_visits)}</td>
+                      <td>{formatNumber(m.bio_link_taps)}</td>
                       <td className="row-actions">
                         <button type="button" onClick={() => setEditingId(m.id)}>
                           Ver / Editar

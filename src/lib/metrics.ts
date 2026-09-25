@@ -12,11 +12,6 @@ export const GENDER_LABELS: Record<Gender, string> = {
   other: 'Outro',
 }
 
-export function percentage(part: number, total: number): number | null {
-  if (!total) return null
-  return (part / total) * 100
-}
-
 /** Porcentagem no padrão brasileiro: vírgula decimal, sem separador de milhar, símbolo %. */
 export function formatPercentBR(value: number | null): string {
   if (value === null) return 'indisponível'
@@ -53,6 +48,13 @@ export function stripThousandsSep(raw: string): string {
   return raw.replace(/\D/g, '')
 }
 
+/** Igual a stripThousandsSep, mas preserva um '-' inicial — usado só por seguidores líquidos. */
+export function stripSignedThousandsSep(raw: string): string {
+  const negative = raw.trim().startsWith('-')
+  const digits = raw.replace(/\D/g, '')
+  return negative ? `-${digits}` : digits
+}
+
 /** Formata uma string de dígitos puros com separador de milhar, para exibição em campos de quantidade. */
 export function formatIntegerInputBR(digits: string): string {
   if (digits === '') return ''
@@ -61,22 +63,30 @@ export function formatIntegerInputBR(digits: string): string {
   return new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 }).format(n)
 }
 
-/** A vírgula é o identificador exclusivo de percentual nos campos de quantidade+percentual; o ponto continua reservado para milhar. */
-export function looksLikePercentInput(raw: string): boolean {
-  return raw.includes(',')
-}
-
 /** Converte um texto digitado no padrão BR (vírgula decimal) em número; 'invalid' se não for um percentual bem formado. */
 export function parsePercentBR(raw: string): number | 'invalid' {
   const cleaned = raw.trim().replace(/\./g, '')
-  if (!/^\d+,\d+$/.test(cleaned)) return 'invalid'
+  if (!/^\d+,\d+$/.test(cleaned) && !/^\d+$/.test(cleaned)) return 'invalid'
   const n = Number(cleaned.replace(',', '.'))
   return Number.isFinite(n) && n >= 0 ? n : 'invalid'
 }
 
-/** Converte um percentual em quantidade inteira, arredondando para o inteiro mais próximo. */
-export function percentToQuantity(percent: number, total: number): number {
-  return Math.round((percent / 100) * total)
+/** '' -> null (campo não informado); "74,9"/"74" -> número 0–100; qualquer outra coisa -> 'invalid'. */
+export function parseOptionalPercentBR(raw: string): number | null | 'invalid' {
+  if (raw.trim() === '') return null
+  const parsed = parsePercentBR(raw)
+  if (parsed === 'invalid') return 'invalid'
+  return parsed > 100 ? 'invalid' : parsed
+}
+
+/**
+ * Sanitiza digitação livre de um campo percentual: mantém só dígitos e uma única
+ * vírgula decimal (a primeira digitada vence; vírgulas extras são descartadas).
+ */
+export function sanitizePercentDraft(raw: string): string {
+  const digitsAndComma = raw.replace(/[^\d,]/g, '')
+  const firstComma = digitsAndComma.indexOf(',')
+  return firstComma === -1 ? digitsAndComma : digitsAndComma.slice(0, firstComma + 1) + digitsAndComma.slice(firstComma + 1).replace(/,/g, '')
 }
 
 export interface Variation {
@@ -154,6 +164,15 @@ export function parseRequiredInt(raw: string): number | 'invalid' {
   if (!/^\d+$/.test(raw.trim())) return 'invalid'
   const n = Number(raw)
   return Number.isInteger(n) && n >= 0 ? n : 'invalid'
+}
+
+/** Igual a parseOptionalInt, mas aceita um '-' inicial — usado só por seguidores líquidos. */
+export function parseOptionalSignedInt(raw: string): number | null | 'invalid' {
+  const trimmed = raw.trim()
+  if (trimmed === '' || trimmed === '-') return null
+  if (!/^-?\d+$/.test(trimmed)) return 'invalid'
+  const n = Number(trimmed)
+  return Number.isInteger(n) ? n : 'invalid'
 }
 
 export interface GoalEstimate {

@@ -8,16 +8,24 @@ export interface Account {
 export const CONTENT_METRIC_TYPES = ['views', 'interactions', 'likes', 'comments', 'reposts', 'shares', 'saves', 'replies'] as const
 export type ContentMetricType = (typeof CONTENT_METRIC_TYPES)[number]
 
+/** Subconjunto de CONTENT_METRIC_TYPES que mantém a divisão por público (seguidores/não seguidores). */
+export const AUDIENCE_SPLIT_METRIC_TYPES = ['views', 'interactions'] as const
+export type AudienceSplitMetricType = (typeof AUDIENCE_SPLIT_METRIC_TYPES)[number]
+
 export const CONTENT_AUDIENCE_TYPES = ['followers', 'non_followers'] as const
 export type ContentAudienceType = (typeof CONTENT_AUDIENCE_TYPES)[number]
 
 export const CONTENT_TYPES = ['reels', 'posts', 'stories'] as const
 export type ContentType = (typeof CONTENT_TYPES)[number]
 
-/** Uma combinação (metric_type, audience_type, content_type) -> value de `content_type_metrics`. */
+/**
+ * Uma combinação (metric_type, audience_type, content_type) -> value de
+ * `content_type_metrics`. `audience_type` é obrigatório para views/interactions
+ * (AUDIENCE_SPLIT_METRIC_TYPES) e null para os demais metric_types.
+ */
 export interface ContentTypeMetric {
   metric_type: ContentMetricType
-  audience_type: ContentAudienceType
+  audience_type: ContentAudienceType | null
   content_type: ContentType
   value: number
 }
@@ -115,11 +123,7 @@ export interface DailyMetric {
   note: string | null
   created_at: string
   views_total: number | null
-  views_from_followers: number | null
-  views_from_non_followers: number | null
   viewers_total: number | null
-  interactions_from_followers: number | null
-  interactions_from_non_followers: number | null
   content_type_metrics: ContentTypeMetric[]
   audience: Audience
 }
@@ -162,11 +166,7 @@ export interface NewMetricInput {
   bio_link_taps?: number | null
   note?: string | null
   views_total?: number | null
-  views_from_followers?: number | null
-  views_from_non_followers?: number | null
   viewers_total?: number | null
-  interactions_from_followers?: number | null
-  interactions_from_non_followers?: number | null
   content_type_metrics?: ContentTypeMetric[]
   audience?: AudienceInput
 }
@@ -184,11 +184,7 @@ export type MetricPatchInput = Partial<
     | 'bio_link_taps'
     | 'note'
     | 'views_total'
-    | 'views_from_followers'
-    | 'views_from_non_followers'
     | 'viewers_total'
-    | 'interactions_from_followers'
-    | 'interactions_from_non_followers'
     | 'content_type_metrics'
     | 'audience'
   >

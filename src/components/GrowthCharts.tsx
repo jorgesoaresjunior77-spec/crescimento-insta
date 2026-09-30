@@ -19,7 +19,11 @@ import { CHART_GRID_COLOR, CHART_TICK_STYLE, GRADIENTS, gradientAt } from '../li
 
 const FORM_GENDER_LABELS: Record<string, string> = { female: 'Mulheres', male: 'Homens', other: 'Outro' }
 
-/** Soma os `content_type_metrics` de uma métrica para (metric_type, content_type), somando seguidores + não seguidores. */
+/**
+ * Soma os `content_type_metrics` de uma métrica para (metric_type, content_type).
+ * Para views/interactions isso soma seguidores + não seguidores (2 linhas); para os
+ * demais metric_types há no máximo 1 linha (audience_type é sempre null).
+ */
 function sumContentType(m: DailyMetric, metricType: string, contentType: string): number | null {
   const rows = m.content_type_metrics.filter((r) => r.metric_type === metricType && r.content_type === contentType)
   if (rows.length === 0) return null

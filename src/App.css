@@ -465,6 +465,26 @@
   color: var(--text-h);
 }
 
+.content-type-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 280px;
+}
+
+.metric-form-v2 .content-type-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.content-type-row input {
+  width: 120px;
+}
+
 .two-col-audience {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -795,6 +815,9 @@ tbody tr:last-child td {
   }
   .stat-value {
     font-size: 22px;
+  }
+  .content-type-rows {
+    max-width: 100%;
   }
   .two-col-audience {
     grid-template-columns: 1fr;

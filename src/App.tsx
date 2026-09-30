@@ -167,11 +167,7 @@ function App() {
       profile_visits: input.profile_visits,
       bio_link_taps: input.bio_link_taps,
       views_total: input.views_total,
-      views_from_followers: input.views_from_followers,
-      views_from_non_followers: input.views_from_non_followers,
       viewers_total: input.viewers_total,
-      interactions_from_followers: input.interactions_from_followers,
-      interactions_from_non_followers: input.interactions_from_non_followers,
       content_type_metrics: input.content_type_metrics,
       audience: input.audience,
     })

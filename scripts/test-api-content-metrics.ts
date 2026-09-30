@@ -1,6 +1,7 @@
 /**
- * Smoke test da API nova (content_type_metrics + audiência percentual) contra a
- * branch de TESTE do Neon, via HTTP real (mesmo caminho de código de produção).
+ * Smoke test da API nova (content_type_metrics com audience_type obrigatório só para
+ * views/interactions + audiência percentual) contra a branch de TESTE do Neon, via
+ * HTTP real (mesmo caminho de código de produção).
  *
  * Pré-requisito: scripts/dev-api-server.ts rodando com
  *   DEV_ENV_FILE=.env.test-branch.local npx tsx scripts/dev-api-server.ts
@@ -15,14 +16,15 @@
 
 const BASE = "http://localhost:3001";
 
-const METRIC_TYPES = ["views", "interactions", "likes", "comments", "reposts", "shares", "saves", "replies"] as const;
+const AUDIENCE_SPLIT_METRIC_TYPES = ["views", "interactions"] as const;
 const AUDIENCE_TYPES = ["followers", "non_followers"] as const;
+const SIMPLE_METRIC_TYPES = ["likes", "comments", "reposts", "shares", "saves", "replies"] as const;
 const CONTENT_TYPES = ["reels", "posts", "stories"] as const;
 
 function allContentTypeMetrics(baseValue: number) {
-  const out: { metric_type: string; audience_type: string; content_type: string; value: number }[] = [];
+  const out: { metric_type: string; audience_type: string | null; content_type: string; value: number }[] = [];
   let i = 0;
-  for (const metric_type of METRIC_TYPES) {
+  for (const metric_type of AUDIENCE_SPLIT_METRIC_TYPES) {
     for (const audience_type of AUDIENCE_TYPES) {
       for (const content_type of CONTENT_TYPES) {
         out.push({ metric_type, audience_type, content_type, value: baseValue + i });
@@ -30,7 +32,13 @@ function allContentTypeMetrics(baseValue: number) {
       }
     }
   }
-  return out; // 8 * 2 * 3 = 48 combinações
+  for (const metric_type of SIMPLE_METRIC_TYPES) {
+    for (const content_type of CONTENT_TYPES) {
+      out.push({ metric_type, audience_type: null, content_type, value: baseValue + i });
+      i++;
+    }
+  }
+  return out; // (2 metric_types * 2 audience_types * 3 content_types) + (6 metric_types * 3 content_types) = 12 + 18 = 30
 }
 
 let failures = 0;
@@ -52,7 +60,7 @@ async function main() {
   const accountId = accountsBody.accounts[0].id;
   console.log(`   conta usada: ${accountsBody.accounts[0].name} (${accountId})`);
 
-  console.log("\n== 2) POST daily_metric #1 (net_follows positivo, 48 combinações de content_type_metrics) ==");
+  console.log("\n== 2) POST daily_metric #1 (net_follows positivo, 30 combinações de content_type_metrics) ==");
   const metric1Payload = {
     account_id: accountId,
     date: "2099-01-01",
@@ -62,11 +70,7 @@ async function main() {
     interactions: 900,
     profile_visits: 500,
     views_total: 20000,
-    views_from_followers: 15000,
-    views_from_non_followers: 5000,
     viewers_total: 18000,
-    interactions_from_followers: 700,
-    interactions_from_non_followers: 200,
     content_type_metrics: allContentTypeMetrics(10),
     audience: {
       genders: [
@@ -101,8 +105,16 @@ async function main() {
   assert(typeof metric1Id === "string", "metric #1 tem id");
   assert(metric1?.net_follows === 1250, `net_follows positivo preservado (${metric1?.net_follows})`);
   assert(metric1?.bio_link_taps === 340, `bio_link_taps preservado (${metric1?.bio_link_taps})`);
-  const ctm1 = metric1?.content_type_metrics as unknown[];
-  assert(Array.isArray(ctm1) && ctm1.length === 48, `content_type_metrics retornou 48 combinações (recebeu ${ctm1?.length})`);
+  assert(metric1?.viewers_total === 18000, `viewers_total preservado (${metric1?.viewers_total})`);
+  assert(metric1?.views_total === 20000, `views_total preservado (${metric1?.views_total})`);
+  assert(metric1?.interactions === 900, `interactions preservado (${metric1?.interactions})`);
+  assert(metric1?.profile_visits === 500, `profile_visits preservado (${metric1?.profile_visits})`);
+  const ctm1 = metric1?.content_type_metrics as Array<{ metric_type: string; audience_type: string | null; content_type: string; value: number }>;
+  assert(Array.isArray(ctm1) && ctm1.length === 30, `content_type_metrics retornou 30 combinações (recebeu ${ctm1?.length})`);
+  const ctm1ViewsRows = (ctm1 ?? []).filter((r) => r.metric_type === "views");
+  assert(ctm1ViewsRows.length === 6 && ctm1ViewsRows.every((r) => r.audience_type === "followers" || r.audience_type === "non_followers"), "views: 6 linhas, todas com audience_type preenchido");
+  const ctm1LikesRows = (ctm1 ?? []).filter((r) => r.metric_type === "likes");
+  assert(ctm1LikesRows.length === 3 && ctm1LikesRows.every((r) => r.audience_type === null), "likes: 3 linhas, todas com audience_type null");
   const metric1Countries = (metric1?.audience as Record<string, unknown> | undefined)?.countries as { country_code: string }[] | undefined;
   const countryCodes = (metric1Countries ?? []).map((c) => c.country_code);
   assert(countryCodes.includes("BR") && !countryCodes.includes("br"), `country_code normalizado para uppercase (${countryCodes.join(",")})`);
@@ -115,8 +127,9 @@ async function main() {
     net_follows: -1250,
     bio_link_taps: 12,
     content_type_metrics: [
-      { metric_type: "likes", audience_type: "followers", content_type: "reels", value: 500 },
-      { metric_type: "replies", audience_type: "non_followers", content_type: "stories", value: 7 },
+      { metric_type: "likes", content_type: "reels", value: 500 },
+      { metric_type: "replies", content_type: "stories", value: 7 },
+      { metric_type: "views", audience_type: "followers", content_type: "reels", value: 100 },
     ],
   };
   const post2Res = await fetch(`${BASE}/api/metrics`, {
@@ -160,13 +173,74 @@ async function main() {
   });
   assert(dupCtmRes.status === 400, `combinação duplicada em content_type_metrics é rejeitada (${dupCtmRes.status})`);
 
+  const likesWithAudienceRes = await fetch(`${BASE}/api/metrics`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      account_id: accountId,
+      date: "2099-01-06",
+      followers: 1,
+      content_type_metrics: [{ metric_type: "likes", audience_type: "followers", content_type: "reels", value: 1 }],
+    }),
+  });
+  assert(likesWithAudienceRes.status === 400, `likes + followers é rejeitado (${likesWithAudienceRes.status})`);
+
+  const commentsWithAudienceRes = await fetch(`${BASE}/api/metrics`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      account_id: accountId,
+      date: "2099-01-07",
+      followers: 1,
+      content_type_metrics: [{ metric_type: "comments", audience_type: "non_followers", content_type: "posts", value: 1 }],
+    }),
+  });
+  assert(commentsWithAudienceRes.status === 400, `comments + non_followers é rejeitado (${commentsWithAudienceRes.status})`);
+
+  const savesWithAudienceRes = await fetch(`${BASE}/api/metrics`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      account_id: accountId,
+      date: "2099-01-08",
+      followers: 1,
+      content_type_metrics: [{ metric_type: "saves", audience_type: "followers", content_type: "stories", value: 1 }],
+    }),
+  });
+  assert(savesWithAudienceRes.status === 400, `saves + followers é rejeitado (${savesWithAudienceRes.status})`);
+
+  const viewsNoAudienceRes = await fetch(`${BASE}/api/metrics`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      account_id: accountId,
+      date: "2099-01-09",
+      followers: 1,
+      content_type_metrics: [{ metric_type: "views", content_type: "reels", value: 1 }],
+    }),
+  });
+  assert(viewsNoAudienceRes.status === 400, `views sem audience_type é rejeitado (${viewsNoAudienceRes.status})`);
+
+  const interactionsNoAudienceRes = await fetch(`${BASE}/api/metrics`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      account_id: accountId,
+      date: "2099-01-10",
+      followers: 1,
+      content_type_metrics: [{ metric_type: "interactions", content_type: "posts", value: 1 }],
+    }),
+  });
+  assert(interactionsNoAudienceRes.status === 400, `interactions sem audience_type é rejeitado (${interactionsNoAudienceRes.status})`);
+
   console.log("\n== 4) GET /api/metrics e conferir os dois registros ==");
   const getRes = await fetch(`${BASE}/api/metrics?account_id=${accountId}&from=2099-01-01&to=2099-01-02`);
   const getBody = (await getRes.json()) as { metrics: Record<string, unknown>[] };
   assert(getRes.ok, "GET /api/metrics respondeu 200");
   assert(getBody.metrics.length === 2, `GET retornou os 2 registros de teste (recebeu ${getBody.metrics.length})`);
   const fetched1 = getBody.metrics.find((m) => m.id === metric1Id);
-  assert(Array.isArray(fetched1?.content_type_metrics) && (fetched1!.content_type_metrics as unknown[]).length === 48, "GET: metric #1 preserva as 48 combinações");
+  assert(Array.isArray(fetched1?.content_type_metrics) && (fetched1!.content_type_metrics as unknown[]).length === 30, "GET: metric #1 preserva as 30 combinações");
+  assert(fetched1?.viewers_total === 18000, "GET: metric #1 preserva viewers_total");
   const fetchedAudience1 = fetched1?.audience as Record<string, unknown>;
   assert((fetchedAudience1?.age_ranges as unknown[])?.length === 4, "GET: metric #1 preserva as 4 linhas de faixa etária (2 faixas x 2 gêneros)");
   assert((fetchedAudience1?.locations as { percent: number }[])?.[0]?.percent === 74.9, "GET: cidade top (Lajeado) com percent 74.9 preservado");
@@ -178,7 +252,10 @@ async function main() {
     body: JSON.stringify({
       id: metric1Id,
       net_follows: -42,
-      content_type_metrics: [{ metric_type: "saves", audience_type: "followers", content_type: "posts", value: 999 }],
+      content_type_metrics: [
+        { metric_type: "saves", content_type: "posts", value: 999 },
+        { metric_type: "interactions", audience_type: "non_followers", content_type: "stories", value: 55 },
+      ],
       audience: {
         genders: [{ gender: "female", percent: 70 }],
       },
@@ -189,7 +266,7 @@ async function main() {
   const patched = patchBody.metric as Record<string, unknown>;
   assert(patched?.net_follows === -42, `PATCH: net_follows atualizado para -42 (${patched?.net_follows})`);
   const patchedCtm = patched?.content_type_metrics as unknown[];
-  assert(patchedCtm?.length === 1, `PATCH: content_type_metrics substituído (agora ${patchedCtm?.length} linha)`);
+  assert(patchedCtm?.length === 2, `PATCH: content_type_metrics substituído (agora ${patchedCtm?.length} linhas)`);
   const patchedAudience = patched?.audience as Record<string, unknown>;
   assert((patchedAudience?.genders as unknown[])?.length === 1, "PATCH: audience.genders substituído (agora 1 linha)");
   assert((patchedAudience?.locations as unknown[])?.length === 0, "PATCH: audience.locations não reenviado -> esvaziado (replace-all, igual ao comportamento já existente)");

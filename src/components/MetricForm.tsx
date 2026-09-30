@@ -1,14 +1,14 @@
 import { useState } from 'react'
 import type {
   AudienceLocation,
+  AudienceSplitMetricType,
   ContentAudienceType,
-  ContentMetricType,
   ContentType,
   ContentTypeMetric,
   DailyMetric,
   NewMetricInput,
 } from '../lib/api'
-import { BRAZIL_STATES, CONTENT_AUDIENCE_TYPES, CONTENT_METRIC_TYPES, CONTENT_TYPES } from '../lib/api'
+import { AUDIENCE_SPLIT_METRIC_TYPES, BRAZIL_STATES, CONTENT_AUDIENCE_TYPES, CONTENT_TYPES } from '../lib/api'
 import { COMMON_COUNTRIES, COUNTRY_LABEL_BY_ALPHA2 } from '../lib/worldCountries'
 import {
   AGE_RANGES,
@@ -25,40 +25,34 @@ import {
 } from '../lib/metrics'
 
 /** Campos escalares opcionais de `daily_metrics` (contagem, sem sinal). */
-const SCALAR_OPTIONAL_FIELDS = [
-  'views_total',
-  'viewers_total',
-  'views_from_followers',
-  'views_from_non_followers',
-  'interactions',
-  'interactions_from_followers',
-  'interactions_from_non_followers',
-  'profile_visits',
-  'bio_link_taps',
-] as const
+const SCALAR_OPTIONAL_FIELDS = ['views_total', 'viewers_total', 'interactions', 'profile_visits', 'bio_link_taps'] as const
 type ScalarOptionalField = (typeof SCALAR_OPTIONAL_FIELDS)[number]
 
 const SCALAR_FIELD_LABELS: Record<ScalarOptionalField, string> = {
   views_total: 'Visualizações',
   viewers_total: 'Visualizadores',
-  views_from_followers: 'Visualizações de seguidores',
-  views_from_non_followers: 'Visualizações de não seguidores',
   interactions: 'Interações',
-  interactions_from_followers: 'Interações de seguidores',
-  interactions_from_non_followers: 'Interações de não seguidores',
   profile_visits: 'Visitas no perfil',
   bio_link_taps: 'Toques no link da bio',
 }
 
-const CONTENT_GROUPS: { metricType: ContentMetricType; title: string; showTudo: boolean }[] = [
+/** Visualizações e Interações: mantêm a divisão por público (seguidores/não seguidores). */
+const SPLIT_GROUPS: { metricType: AudienceSplitMetricType; title: string; showTudo: boolean }[] = [
   { metricType: 'views', title: 'Visualizações por tipo de conteúdo', showTudo: false },
   { metricType: 'interactions', title: 'Interações por tipo de conteúdo', showTudo: true },
-  { metricType: 'likes', title: 'Curtidas', showTudo: false },
-  { metricType: 'comments', title: 'Comentários', showTudo: false },
-  { metricType: 'reposts', title: 'Reposts', showTudo: false },
-  { metricType: 'shares', title: 'Compartilhamentos', showTudo: false },
-  { metricType: 'saves', title: 'Salvamentos', showTudo: false },
-  { metricType: 'replies', title: 'Respostas', showTudo: false },
+]
+
+const SIMPLE_METRIC_TYPES = ['likes', 'comments', 'reposts', 'shares', 'saves', 'replies'] as const
+type SimpleMetricType = (typeof SIMPLE_METRIC_TYPES)[number]
+
+/** Curtidas até Respostas: sem divisão por público, só Reels/Posts/Stories. */
+const SIMPLE_GROUPS: { metricType: SimpleMetricType; title: string }[] = [
+  { metricType: 'likes', title: 'Curtidas' },
+  { metricType: 'comments', title: 'Comentários' },
+  { metricType: 'reposts', title: 'Reposts' },
+  { metricType: 'shares', title: 'Compartilhamentos' },
+  { metricType: 'saves', title: 'Salvamentos' },
+  { metricType: 'replies', title: 'Respostas' },
 ]
 
 const CONTENT_TYPE_LABELS: Record<ContentType, string> = { reels: 'Reels', posts: 'Posts', stories: 'Stories' }
@@ -145,11 +139,11 @@ function percentToDraft(value: number): string {
   return String(value).replace('.', ',')
 }
 
-type ContentDrafts = Record<ContentMetricType, Record<ContentAudienceType, Record<ContentType, string>>>
+type SplitContentDrafts = Record<AudienceSplitMetricType, Record<ContentAudienceType, Record<ContentType, string>>>
 
-function emptyContentDrafts(): ContentDrafts {
-  const out = {} as ContentDrafts
-  for (const metricType of CONTENT_METRIC_TYPES) {
+function emptySplitContentDrafts(): SplitContentDrafts {
+  const out = {} as SplitContentDrafts
+  for (const metricType of AUDIENCE_SPLIT_METRIC_TYPES) {
     out[metricType] = {} as Record<ContentAudienceType, Record<ContentType, string>>
     for (const audienceType of CONTENT_AUDIENCE_TYPES) {
       out[metricType][audienceType] = {} as Record<ContentType, string>
@@ -161,11 +155,38 @@ function emptyContentDrafts(): ContentDrafts {
   return out
 }
 
-function metricToContentDrafts(m?: DailyMetric): ContentDrafts {
-  const out = emptyContentDrafts()
+function metricToSplitContentDrafts(m?: DailyMetric): SplitContentDrafts {
+  const out = emptySplitContentDrafts()
   if (m) {
     for (const row of m.content_type_metrics) {
-      out[row.metric_type][row.audience_type][row.content_type] = String(row.value)
+      if (row.audience_type && (AUDIENCE_SPLIT_METRIC_TYPES as readonly string[]).includes(row.metric_type)) {
+        out[row.metric_type as AudienceSplitMetricType][row.audience_type][row.content_type] = String(row.value)
+      }
+    }
+  }
+  return out
+}
+
+type SimpleContentDrafts = Record<SimpleMetricType, Record<ContentType, string>>
+
+function emptySimpleContentDrafts(): SimpleContentDrafts {
+  const out = {} as SimpleContentDrafts
+  for (const metricType of SIMPLE_METRIC_TYPES) {
+    out[metricType] = {} as Record<ContentType, string>
+    for (const contentType of CONTENT_TYPES) {
+      out[metricType][contentType] = ''
+    }
+  }
+  return out
+}
+
+function metricToSimpleContentDrafts(m?: DailyMetric): SimpleContentDrafts {
+  const out = emptySimpleContentDrafts()
+  if (m) {
+    for (const row of m.content_type_metrics) {
+      if (!row.audience_type && (SIMPLE_METRIC_TYPES as readonly string[]).includes(row.metric_type)) {
+        out[row.metric_type as SimpleMetricType][row.content_type] = String(row.value)
+      }
     }
   }
   return out
@@ -298,7 +319,8 @@ export default function MetricForm({
   deleting,
 }: MetricFormProps) {
   const [values, setValues] = useState<FormValues>(() => (initial ? metricToFormValues(initial) : emptyFormValues()))
-  const [contentDrafts, setContentDrafts] = useState<ContentDrafts>(() => metricToContentDrafts(initial))
+  const [splitContentDrafts, setSplitContentDrafts] = useState<SplitContentDrafts>(() => metricToSplitContentDrafts(initial))
+  const [simpleContentDrafts, setSimpleContentDrafts] = useState<SimpleContentDrafts>(() => metricToSimpleContentDrafts(initial))
   const [genderDrafts, setGenderDrafts] = useState<GenderDrafts>(() => metricToGenderDrafts(initial))
   const [ageDrafts, setAgeDrafts] = useState<AgeDrafts>(() => metricToAgeDrafts(initial))
   const [locationDrafts, setLocationDrafts] = useState<LocationDraft[]>(() => metricToLocationDrafts(initial, templateLocations))
@@ -312,10 +334,17 @@ export default function MetricForm({
     setValues((v) => ({ ...v, [field]: raw }))
   }
 
-  function setContentDraft(metricType: ContentMetricType, audienceType: ContentAudienceType, contentType: ContentType, raw: string) {
-    setContentDrafts((d) => ({
+  function setSplitContentDraft(metricType: AudienceSplitMetricType, audienceType: ContentAudienceType, contentType: ContentType, raw: string) {
+    setSplitContentDrafts((d) => ({
       ...d,
       [metricType]: { ...d[metricType], [audienceType]: { ...d[metricType][audienceType], [contentType]: raw } },
+    }))
+  }
+
+  function setSimpleContentDraft(metricType: SimpleMetricType, contentType: ContentType, raw: string) {
+    setSimpleContentDrafts((d) => ({
+      ...d,
+      [metricType]: { ...d[metricType], [contentType]: raw },
     }))
   }
 
@@ -395,10 +424,10 @@ export default function MetricForm({
     }
 
     const contentTypeMetrics: ContentTypeMetric[] = []
-    for (const group of CONTENT_GROUPS) {
+    for (const group of SPLIT_GROUPS) {
       for (const audienceType of CONTENT_AUDIENCE_TYPES) {
         for (const contentType of CONTENT_TYPES) {
-          const raw = contentDrafts[group.metricType][audienceType][contentType]
+          const raw = splitContentDrafts[group.metricType][audienceType][contentType]
           const parsed = parseOptionalInt(raw)
           if (parsed === 'invalid') {
             const audienceLabel = audienceType === 'followers' ? 'seguidores' : 'não seguidores'
@@ -408,6 +437,19 @@ export default function MetricForm({
           if (parsed !== null) {
             contentTypeMetrics.push({ metric_type: group.metricType, audience_type: audienceType, content_type: contentType, value: parsed })
           }
+        }
+      }
+    }
+    for (const group of SIMPLE_GROUPS) {
+      for (const contentType of CONTENT_TYPES) {
+        const raw = simpleContentDrafts[group.metricType][contentType]
+        const parsed = parseOptionalInt(raw)
+        if (parsed === 'invalid') {
+          setFieldError(`${group.title} (${CONTENT_TYPE_LABELS[contentType]}) deve ser um número inteiro maior ou igual a 0.`)
+          return
+        }
+        if (parsed !== null) {
+          contentTypeMetrics.push({ metric_type: group.metricType, audience_type: null, content_type: contentType, value: parsed })
         }
       }
     }
@@ -488,11 +530,7 @@ export default function MetricForm({
       note: values.note.trim() === '' ? null : values.note.trim(),
       views_total: parsedScalars.views_total ?? null,
       viewers_total: parsedScalars.viewers_total ?? null,
-      views_from_followers: parsedScalars.views_from_followers ?? null,
-      views_from_non_followers: parsedScalars.views_from_non_followers ?? null,
       interactions: parsedScalars.interactions ?? null,
-      interactions_from_followers: parsedScalars.interactions_from_followers ?? null,
-      interactions_from_non_followers: parsedScalars.interactions_from_non_followers ?? null,
       profile_visits: parsedScalars.profile_visits ?? null,
       bio_link_taps: parsedScalars.bio_link_taps ?? null,
       content_type_metrics: contentTypeMetrics,
@@ -509,7 +547,7 @@ export default function MetricForm({
     )
   }
 
-  function contentGroup(group: (typeof CONTENT_GROUPS)[number]) {
+  function splitContentGroup(group: (typeof SPLIT_GROUPS)[number]) {
     return (
       <fieldset key={group.metricType} className="content-group">
         <legend>{group.title}</legend>
@@ -522,8 +560,8 @@ export default function MetricForm({
                 {CONTENT_TYPE_LABELS[ct]}
                 <IntegerTextInput
                   placeholder="indisponível"
-                  value={contentDrafts[group.metricType].followers[ct]}
-                  onChange={(digits) => setContentDraft(group.metricType, 'followers', ct, digits)}
+                  value={splitContentDrafts[group.metricType].followers[ct]}
+                  onChange={(digits) => setSplitContentDraft(group.metricType, 'followers', ct, digits)}
                 />
               </label>
             ))}
@@ -535,12 +573,32 @@ export default function MetricForm({
                 {CONTENT_TYPE_LABELS[ct]}
                 <IntegerTextInput
                   placeholder="indisponível"
-                  value={contentDrafts[group.metricType].non_followers[ct]}
-                  onChange={(digits) => setContentDraft(group.metricType, 'non_followers', ct, digits)}
+                  value={splitContentDrafts[group.metricType].non_followers[ct]}
+                  onChange={(digits) => setSplitContentDraft(group.metricType, 'non_followers', ct, digits)}
                 />
               </label>
             ))}
           </div>
+        </div>
+      </fieldset>
+    )
+  }
+
+  function simpleContentGroup(group: (typeof SIMPLE_GROUPS)[number]) {
+    return (
+      <fieldset key={group.metricType} className="content-group">
+        <legend>{group.title}</legend>
+        <div className="content-type-rows">
+          {CONTENT_TYPES.map((ct) => (
+            <label key={ct} className="content-type-row">
+              {CONTENT_TYPE_LABELS[ct]}
+              <IntegerTextInput
+                placeholder="indisponível"
+                value={simpleContentDrafts[group.metricType][ct]}
+                onChange={(digits) => setSimpleContentDraft(group.metricType, ct, digits)}
+              />
+            </label>
+          ))}
         </div>
       </fieldset>
     )
@@ -573,6 +631,7 @@ export default function MetricForm({
       <fieldset>
         <legend>Métricas principais</legend>
         <div className="field-grid">
+          {scalarField('viewers_total')}
           {scalarField('views_total')}
           <label>
             Seguidores líquidos
@@ -582,17 +641,10 @@ export default function MetricForm({
           {scalarField('profile_visits')}
           {scalarField('bio_link_taps')}
         </div>
-        <h4>Detalhamento agregado (opcional)</h4>
-        <div className="field-grid">
-          {scalarField('viewers_total')}
-          {scalarField('views_from_followers')}
-          {scalarField('views_from_non_followers')}
-          {scalarField('interactions_from_followers')}
-          {scalarField('interactions_from_non_followers')}
-        </div>
       </fieldset>
 
-      {CONTENT_GROUPS.map(contentGroup)}
+      {SPLIT_GROUPS.map(splitContentGroup)}
+      {SIMPLE_GROUPS.map(simpleContentGroup)}
 
       <fieldset>
         <legend>Gênero</legend>

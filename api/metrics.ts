@@ -14,6 +14,8 @@ const GENDERS = ["female", "male", "other"] as const;
 const AGE_RANGE_GENDERS = ["female", "male"] as const;
 
 const METRIC_TYPES = ["views", "interactions", "likes", "comments", "reposts", "shares", "saves", "replies"] as const;
+/** Subconjunto de METRIC_TYPES que mantém a divisão por público (audience_type obrigatório). Os demais exigem audience_type = null. */
+const AUDIENCE_SPLIT_METRIC_TYPES = ["views", "interactions"] as const;
 const AUDIENCE_TYPES = ["followers", "non_followers"] as const;
 const CONTENT_TYPES = ["reels", "posts", "stories"] as const;
 
@@ -26,8 +28,8 @@ const BRAZIL_UF_CODES = [
 /**
  * Campos escalares de `daily_metrics` (nível "dia", sem quebra por tipo de conteúdo).
  * As métricas por tipo de conteúdo (views/interactions/likes/comments/reposts/shares/
- * saves/replies × reels/posts/stories × followers/non_followers) vivem em
- * `content_type_metrics` — ver validateContentTypeMetrics/handlePost/handlePatch.
+ * saves/replies × reels/posts/stories) vivem em `content_type_metrics` — ver
+ * validateContentTypeMetrics/handlePost/handlePatch.
  */
 const OPTIONAL_METRIC_INT_FIELDS = [
   "reach",
@@ -35,11 +37,7 @@ const OPTIONAL_METRIC_INT_FIELDS = [
   "profile_visits",
   "posts_published",
   "views_total",
-  "views_from_followers",
-  "views_from_non_followers",
   "viewers_total",
-  "interactions_from_followers",
-  "interactions_from_non_followers",
   "bio_link_taps",
 ] as const;
 type OptionalMetricIntField = (typeof OPTIONAL_METRIC_INT_FIELDS)[number];
@@ -47,8 +45,7 @@ type OptionalMetricIntField = (typeof OPTIONAL_METRIC_INT_FIELDS)[number];
 const METRIC_COLUMNS = `
   id, account_id, date::text as date, followers, net_follows, reach, interactions, profile_visits,
   posts_published, note, created_at,
-  views_total, views_from_followers, views_from_non_followers, viewers_total,
-  interactions_from_followers, interactions_from_non_followers, bio_link_taps
+  views_total, viewers_total, bio_link_taps
 `;
 
 interface DailyMetricRow {
@@ -64,17 +61,13 @@ interface DailyMetricRow {
   note: string | null;
   created_at: string;
   views_total: number | null;
-  views_from_followers: number | null;
-  views_from_non_followers: number | null;
   viewers_total: number | null;
-  interactions_from_followers: number | null;
-  interactions_from_non_followers: number | null;
   bio_link_taps: number | null;
 }
 
 interface ContentTypeMetricRow {
   metric_type: string;
-  audience_type: string;
+  audience_type: string | null;
   content_type: string;
   value: number;
 }
@@ -220,7 +213,11 @@ type ContentTypeMetricsResult =
 /**
  * `content_type_metrics`: cada item é uma combinação (metric_type, audience_type,
  * content_type) -> value. "TUDO" (agrupador visual do bloco Interações no formulário)
- * nunca vira uma linha aqui — audience_type só aceita 'followers'/'non_followers'.
+ * nunca vira uma linha aqui — é só um elemento visual do layout.
+ *
+ * audience_type é obrigatório ('followers'/'non_followers') para
+ * AUDIENCE_SPLIT_METRIC_TYPES (views/interactions) e proibido (deve ficar ausente/null)
+ * para os demais metric_types — espelha a CHECK de correlação no banco.
  */
 function validateContentTypeMetrics(raw: unknown): ContentTypeMetricsResult {
   if (raw === undefined || raw === null) return { ok: true, value: [] };
@@ -236,15 +233,28 @@ function validateContentTypeMetrics(raw: unknown): ContentTypeMetricsResult {
     if (typeof metricType !== "string" || !(METRIC_TYPES as readonly string[]).includes(metricType)) {
       return { ok: false, error: `content_type_metrics: 'metric_type' deve ser um de: ${METRIC_TYPES.join(", ")}.` };
     }
-    const audienceType = record.audience_type;
-    if (typeof audienceType !== "string" || !(AUDIENCE_TYPES as readonly string[]).includes(audienceType)) {
-      return { ok: false, error: `content_type_metrics: 'audience_type' deve ser um de: ${AUDIENCE_TYPES.join(", ")}.` };
+    const requiresAudience = (AUDIENCE_SPLIT_METRIC_TYPES as readonly string[]).includes(metricType);
+    const rawAudienceType = record.audience_type;
+    let audienceType: string | null;
+    if (requiresAudience) {
+      if (typeof rawAudienceType !== "string" || !(AUDIENCE_TYPES as readonly string[]).includes(rawAudienceType)) {
+        return {
+          ok: false,
+          error: `content_type_metrics (${metricType}): 'audience_type' é obrigatório e deve ser um de: ${AUDIENCE_TYPES.join(", ")}.`,
+        };
+      }
+      audienceType = rawAudienceType;
+    } else {
+      if (rawAudienceType !== undefined && rawAudienceType !== null) {
+        return { ok: false, error: `content_type_metrics (${metricType}): 'audience_type' não é permitido para este metric_type.` };
+      }
+      audienceType = null;
     }
     const contentType = record.content_type;
     if (typeof contentType !== "string" || !(CONTENT_TYPES as readonly string[]).includes(contentType)) {
       return { ok: false, error: `content_type_metrics: 'content_type' deve ser um de: ${CONTENT_TYPES.join(", ")}.` };
     }
-    const key = `${metricType}|${audienceType}|${contentType}`;
+    const key = `${metricType}|${audienceType ?? "none"}|${contentType}`;
     const value = validateNonNegInt(record.value, `content_type_metrics (${key}) value`, true);
     if (!value.ok) return { ok: false, error: value.error };
     if (seen.has(key)) {
@@ -564,7 +574,7 @@ async function handleGet(request: Request, sql: ReturnType<typeof neon>): Promis
     for (const row of countryRows as Array<{ daily_metric_id: string; country_code: string; country_name: string; percent: number }>) {
       byId.get(row.daily_metric_id)?.audience.countries.push({ country_code: row.country_code, country_name: row.country_name, percent: row.percent });
     }
-    for (const row of contentTypeRows as Array<{ daily_metric_id: string; metric_type: string; audience_type: string; content_type: string; value: number }>) {
+    for (const row of contentTypeRows as Array<{ daily_metric_id: string; metric_type: string; audience_type: string | null; content_type: string; value: number }>) {
       byId.get(row.daily_metric_id)?.content_type_metrics.push({
         metric_type: row.metric_type,
         audience_type: row.audience_type,
@@ -652,13 +662,11 @@ async function handlePost(request: Request, sql: ReturnType<typeof neon>): Promi
       sql`
         insert into daily_metrics
           (id, account_id, date, followers, net_follows, reach, interactions, profile_visits, posts_published, note,
-           views_total, views_from_followers, views_from_non_followers, viewers_total,
-           interactions_from_followers, interactions_from_non_followers, bio_link_taps)
+           views_total, viewers_total, bio_link_taps)
         values
           (${newId}, ${accountId}, ${date}, ${followers.value}, ${netFollows.value}, ${o.reach}, ${o.interactions},
            ${o.profile_visits}, ${o.posts_published}, ${note.value},
-           ${o.views_total}, ${o.views_from_followers}, ${o.views_from_non_followers}, ${o.viewers_total},
-           ${o.interactions_from_followers}, ${o.interactions_from_non_followers}, ${o.bio_link_taps})
+           ${o.views_total}, ${o.viewers_total}, ${o.bio_link_taps})
         returning ${sql.unsafe(METRIC_COLUMNS)}
       `,
       ...resolvedLocations.map(
@@ -856,11 +864,7 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
           posts_published = ${m.posts_published},
           note = ${m.note},
           views_total = ${m.views_total},
-          views_from_followers = ${m.views_from_followers},
-          views_from_non_followers = ${m.views_from_non_followers},
           viewers_total = ${m.viewers_total},
-          interactions_from_followers = ${m.interactions_from_followers},
-          interactions_from_non_followers = ${m.interactions_from_non_followers},
           bio_link_taps = ${m.bio_link_taps}
         where id = ${id}
         returning ${sql.unsafe(METRIC_COLUMNS)}

@@ -316,13 +316,7 @@
   width: 100%;
 }
 
-/* ---------- Mapas de audiência (Brasil + Mundo) ---------- */
-.maps-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-}
-
+/* ---------- Mapa de audiência (Brasil) ---------- */
 .audience-map-body {
   display: flex;
   gap: 16px;
@@ -382,12 +376,6 @@
 
   td.pct {
     color: var(--text);
-  }
-}
-
-@media (max-width: 900px) {
-  .maps-row {
-    grid-template-columns: 1fr;
   }
 }
 
@@ -485,45 +473,6 @@
   width: 120px;
 }
 
-.two-col-audience {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 16px;
-  margin-bottom: 12px;
-}
-
-.audience-col {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px;
-  background: var(--card-bg);
-}
-
-.audience-col-title {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--accent);
-}
-
-.content-group-tudo {
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text);
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 2px 10px;
-  margin-bottom: 10px;
-}
-
 /* Campo percentual nativo: input + sufixo "%" fixo ao lado (nunca dentro do valor digitado). */
 .percent-field {
   display: inline-flex;
@@ -543,92 +492,18 @@
   color: var(--accent);
 }
 
-.age-range-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.age-range-row {
-  display: grid;
-  grid-template-columns: 56px 1fr 1fr;
-  gap: 10px;
-  align-items: end;
-
-  @media (max-width: 640px) {
-    grid-template-columns: 1fr 1fr;
-
-    .age-range-label {
-      grid-column: 1 / -1;
-    }
-  }
-}
-
-.age-range-label {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-h);
-}
-
-/* Mesmo padrão de .location-row, com uma coluna a menos (sem UF). */
-.country-row {
-  display: grid;
-  grid-template-columns: minmax(140px, 1.6fr) minmax(96px, 140px) minmax(76px, auto);
-  gap: 6px;
-  align-items: center;
-
-  select {
-    font: inherit;
-    font-size: 13px;
-    padding: 6px 8px;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    background: var(--card-bg);
-    color: var(--text-h);
-    width: 100%;
-    box-sizing: border-box;
-
-    &:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 1px;
-    }
-  }
-
-  input {
-    font-size: 13px;
-    padding: 6px 8px;
-  }
-
-  button {
-    font: inherit;
-    font-size: 12px;
-    padding: 6px 10px;
-    min-height: 32px;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    background: var(--bg-elevated);
-    color: var(--text-h);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  @media (max-width: 640px) {
-    grid-template-columns: 1fr;
-  }
-}
-
 .audience-locations {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-/* Cada linha é um "card" compacto de cidade: nome, UF, seguidores e remover numa única
-   faixa em telas largas (grid, não flex — flex fazia cada campo herdar width:100% dos
-   inputs do formulário e forçava quebra de linha por campo). */
+/* Cada linha é um "card" compacto de cidade fixa: rótulo (Cidade N), nome, UF e
+   percentual numa única faixa em telas largas (grid, não flex — flex fazia cada campo
+   herdar width:100% dos inputs do formulário e forçava quebra de linha por campo). */
 .location-row {
   display: grid;
-  grid-template-columns: minmax(110px, 1.6fr) 108px minmax(96px, 140px) minmax(76px, auto);
+  grid-template-columns: 72px minmax(110px, 1.6fr) 108px minmax(96px, 140px);
   gap: 6px;
   align-items: center;
 
@@ -650,35 +525,15 @@
     }
   }
 
-  button {
-    font: inherit;
-    font-size: 12px;
-    padding: 6px 10px;
-    min-height: 32px;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    background: var(--bg-elevated);
-    color: var(--text-h);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
   @media (max-width: 640px) {
     grid-template-columns: 1fr;
   }
 }
 
-.audience-locations > button {
-  align-self: flex-start;
-  font: inherit;
-  font-size: 13px;
-  padding: 6px 12px;
-  min-height: 32px;
-  border-radius: 6px;
-  border: 1px solid var(--accent-border);
-  background: var(--accent-bg);
+.location-row-label {
+  font-size: 12px;
+  font-weight: 700;
   color: var(--text-h);
-  cursor: pointer;
 }
 
 .form-actions {
@@ -818,9 +673,6 @@ tbody tr:last-child td {
   }
   .content-type-rows {
     max-width: 100%;
-  }
-  .two-col-audience {
-    grid-template-columns: 1fr;
   }
   .metric-form-v2 label {
     min-width: 120px;

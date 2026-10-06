@@ -1,17 +1,5 @@
 import type { DailyMetric } from './api'
 
-export const AGE_RANGES = ['13-17', '18-24', '25-34', '35-44', '45-54', '55-64', '65+'] as const
-export type AgeRange = (typeof AGE_RANGES)[number]
-
-export const GENDERS = ['female', 'male', 'other'] as const
-export type Gender = (typeof GENDERS)[number]
-
-export const GENDER_LABELS: Record<Gender, string> = {
-  female: 'Feminino',
-  male: 'Masculino',
-  other: 'Outro',
-}
-
 /** Porcentagem no padrão brasileiro: vírgula decimal, sem separador de milhar, símbolo %. */
 export function formatPercentBR(value: number | null): string {
   if (value === null) return 'indisponível'
@@ -46,13 +34,6 @@ export function formatNumber(value: number | null): string {
 /** Remove tudo que não for dígito (aceita colar/digitar com ou sem separador de milhar). */
 export function stripThousandsSep(raw: string): string {
   return raw.replace(/\D/g, '')
-}
-
-/** Igual a stripThousandsSep, mas preserva um '-' inicial — usado só por seguidores líquidos. */
-export function stripSignedThousandsSep(raw: string): string {
-  const negative = raw.trim().startsWith('-')
-  const digits = raw.replace(/\D/g, '')
-  return negative ? `-${digits}` : digits
 }
 
 /** Formata uma string de dígitos puros com separador de milhar, para exibição em campos de quantidade. */
@@ -164,15 +145,6 @@ export function parseRequiredInt(raw: string): number | 'invalid' {
   if (!/^\d+$/.test(raw.trim())) return 'invalid'
   const n = Number(raw)
   return Number.isInteger(n) && n >= 0 ? n : 'invalid'
-}
-
-/** Igual a parseOptionalInt, mas aceita um '-' inicial — usado só por seguidores líquidos. */
-export function parseOptionalSignedInt(raw: string): number | null | 'invalid' {
-  const trimmed = raw.trim()
-  if (trimmed === '' || trimmed === '-') return null
-  if (!/^-?\d+$/.test(trimmed)) return 'invalid'
-  const n = Number(trimmed)
-  return Number.isInteger(n) ? n : 'invalid'
 }
 
 export interface GoalEstimate {

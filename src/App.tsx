@@ -24,7 +24,6 @@ import MetricForm from './components/MetricForm'
 import GrowthCharts from './components/GrowthCharts'
 import GoalCard from './components/GoalCard'
 import BrazilAudienceMap from './components/BrazilAudienceMap'
-import WorldAudienceMap from './components/WorldAudienceMap'
 
 type LoadState<T> =
   | { status: 'loading' }
@@ -129,17 +128,6 @@ function App() {
     return []
   }, [sortedMetrics])
 
-  const mapCountries = useMemo<DailyMetric['audience']['countries']>(() => {
-    // Mesma lógica temporal de mapLocations, aplicada a países: registro mais recente do
-    // período que tenha países cadastrados — nunca mock, nunca soma de múltiplos dias.
-    for (let i = filteredMetrics.length - 1; i >= 0; i--) {
-      if (filteredMetrics[i].audience.countries.length > 0) {
-        return filteredMetrics[i].audience.countries
-      }
-    }
-    return []
-  }, [filteredMetrics])
-
   function handleCreateSubmit(input: NewMetricInput) {
     setCreateStatus('saving')
     setCreateError(null)
@@ -160,7 +148,6 @@ function App() {
     updateMetric(id, {
       date: input.date,
       followers: input.followers,
-      net_follows: input.net_follows,
       posts_published: input.posts_published,
       note: input.note,
       interactions: input.interactions,
@@ -248,9 +235,9 @@ function App() {
       {/*
         'loading' e 'error' ficam de fora de propósito (mantém o comportamento já existente:
         essas seções só aparecem quando há uma resposta da API, seja com dados ou vazia).
-        'empty' entra aqui para que Dashboard e mapas fiquem visíveis mesmo sem nenhum
+        'empty' entra aqui para que Dashboard e mapa fiquem visíveis mesmo sem nenhum
         registro ainda — cada componente sabe renderizar seu próprio estado vazio/neutro
-        (GrowthCharts já faz isso por gráfico; BrazilAudienceMap/WorldAudienceMap idem).
+        (GrowthCharts já faz isso por gráfico; BrazilAudienceMap idem).
       */}
       {selectedAccount && (metricsState.status === 'ready' || metricsState.status === 'empty') && (
         <section className="charts-section">
@@ -262,10 +249,7 @@ function App() {
       {selectedAccount && (metricsState.status === 'ready' || metricsState.status === 'empty') && (
         <section className="charts-section">
           <h2>Distribuição geográfica</h2>
-          <div className="maps-row">
-            <BrazilAudienceMap locations={mapLocations} />
-            <WorldAudienceMap countries={mapCountries} />
-          </div>
+          <BrazilAudienceMap locations={mapLocations} />
         </section>
       )}
 
@@ -309,7 +293,6 @@ function App() {
                 <tr>
                   <th>Data</th>
                   <th>Seguidores</th>
-                  <th>Seg. líquidos</th>
                   <th>Visualizações</th>
                   <th>Interações</th>
                   <th>Visitas perfil</th>
@@ -321,7 +304,7 @@ function App() {
                 {[...filteredMetrics].reverse().map((m) =>
                   editingId === m.id ? (
                     <tr key={m.id} className="editing-row">
-                      <td colSpan={8}>
+                      <td colSpan={7}>
                         <MetricForm
                           accountId={m.account_id}
                           mode="edit"
@@ -342,7 +325,6 @@ function App() {
                     <tr key={m.id}>
                       <td>{formatCalendarDateBR(m.date)}</td>
                       <td>{formatNumber(m.followers)}</td>
-                      <td>{m.net_follows === null ? 'indisponível' : `${m.net_follows > 0 ? '+' : ''}${formatNumber(m.net_follows)}`}</td>
                       <td>{formatNumber(m.views_total)}</td>
                       <td>{formatNumber(m.interactions)}</td>
                       <td>{formatNumber(m.profile_visits)}</td>

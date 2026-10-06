@@ -5,27 +5,15 @@ export interface Account {
   created_at: string
 }
 
-export const CONTENT_METRIC_TYPES = ['views', 'interactions', 'likes', 'comments', 'reposts', 'shares', 'saves', 'replies'] as const
+export const CONTENT_METRIC_TYPES = ['views', 'interactions'] as const
 export type ContentMetricType = (typeof CONTENT_METRIC_TYPES)[number]
-
-/** Subconjunto de CONTENT_METRIC_TYPES que mantém a divisão por público (seguidores/não seguidores). */
-export const AUDIENCE_SPLIT_METRIC_TYPES = ['views', 'interactions'] as const
-export type AudienceSplitMetricType = (typeof AUDIENCE_SPLIT_METRIC_TYPES)[number]
-
-export const CONTENT_AUDIENCE_TYPES = ['followers', 'non_followers'] as const
-export type ContentAudienceType = (typeof CONTENT_AUDIENCE_TYPES)[number]
 
 export const CONTENT_TYPES = ['reels', 'posts', 'stories'] as const
 export type ContentType = (typeof CONTENT_TYPES)[number]
 
-/**
- * Uma combinação (metric_type, audience_type, content_type) -> value de
- * `content_type_metrics`. `audience_type` é obrigatório para views/interactions
- * (AUDIENCE_SPLIT_METRIC_TYPES) e null para os demais metric_types.
- */
+/** Uma combinação (metric_type, content_type) -> value (total único) de `content_type_metrics`. */
 export interface ContentTypeMetric {
   metric_type: ContentMetricType
-  audience_type: ContentAudienceType | null
   content_type: ContentType
   value: number
 }
@@ -78,35 +66,12 @@ export const BRAZIL_STATES: BrazilStateOption[] = [
   { value: 'TO', label: 'Tocantins' },
 ]
 
-export interface AudienceAgeRange {
-  age_range: string
-  gender: string
-  percent: number
-}
-
-export interface AudienceGender {
-  gender: string
-  percent: number
-}
-
-export interface AudienceCountry {
-  country_code: string
-  country_name: string
-  percent: number
-}
-
 export interface Audience {
   locations: AudienceLocation[]
-  age_ranges: AudienceAgeRange[]
-  genders: AudienceGender[]
-  countries: AudienceCountry[]
 }
 
 export interface AudienceInput {
   locations?: AudienceLocationInput[]
-  age_ranges?: AudienceAgeRange[]
-  genders?: AudienceGender[]
-  countries?: AudienceCountry[]
 }
 
 export interface DailyMetric {
@@ -114,7 +79,6 @@ export interface DailyMetric {
   account_id: string
   date: string
   followers: number
-  net_follows: number | null
   reach: number | null
   interactions: number | null
   profile_visits: number | null
@@ -158,7 +122,6 @@ export interface NewMetricInput {
   account_id: string
   date: string
   followers: number
-  net_follows?: number | null
   reach?: number | null
   interactions?: number | null
   profile_visits?: number | null
@@ -176,7 +139,6 @@ export type MetricPatchInput = Partial<
     NewMetricInput,
     | 'date'
     | 'followers'
-    | 'net_follows'
     | 'reach'
     | 'interactions'
     | 'profile_visits'

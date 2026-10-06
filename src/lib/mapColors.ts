@@ -1,5 +1,5 @@
 // Espelha as cores de src/lib/palette.ts / index.css (SVG precisa de cor literal, não var()).
-// Compartilhado entre BrazilAudienceMap e WorldAudienceMap para manter a mesma escala visual.
+// Usado por BrazilAudienceMap.
 export const MAP_NO_DATA_FILL = '#232b57'
 export const MAP_SCALE_TO = '#8b5cf6' // --grad-violet-from
 export const MAP_STROKE = '#3a4270'

@@ -1,33 +1,12 @@
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  Cell,
-  Bar,
-  BarChart,
-  Legend,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+import { Area, AreaChart, CartesianGrid, Bar, BarChart, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { DailyMetric } from '../lib/api'
-import { AGE_RANGES, formatCalendarDateBR } from '../lib/metrics'
-import { CHART_GRID_COLOR, CHART_TICK_STYLE, GRADIENTS, gradientAt } from '../lib/palette'
+import { formatCalendarDateBR } from '../lib/metrics'
+import { CHART_GRID_COLOR, CHART_TICK_STYLE, GRADIENTS } from '../lib/palette'
 
-const FORM_GENDER_LABELS: Record<string, string> = { female: 'Mulheres', male: 'Homens', other: 'Outro' }
-
-/**
- * Soma os `content_type_metrics` de uma métrica para (metric_type, content_type).
- * Para views/interactions isso soma seguidores + não seguidores (2 linhas); para os
- * demais metric_types há no máximo 1 linha (audience_type é sempre null).
- */
+/** Valor de `content_type_metrics` para (metric_type, content_type); null se não informado. */
 function sumContentType(m: DailyMetric, metricType: string, contentType: string): number | null {
-  const rows = m.content_type_metrics.filter((r) => r.metric_type === metricType && r.content_type === contentType)
-  if (rows.length === 0) return null
-  return rows.reduce((sum, r) => sum + r.value, 0)
+  const row = m.content_type_metrics.find((r) => r.metric_type === metricType && r.content_type === contentType)
+  return row ? row.value : null
 }
 
 function GradientDefs() {
@@ -83,28 +62,6 @@ export default function GrowthCharts({ metrics }: { metrics: DailyMetric[] }) {
     views_posts: sumContentType(m, 'views', 'posts'),
     views_reels: sumContentType(m, 'views', 'reels'),
   }))
-
-  const latestGenders = (() => {
-    for (let i = metrics.length - 1; i >= 0; i--) {
-      if (metrics[i].audience.genders.length > 0) return metrics[i].audience.genders
-    }
-    return []
-  })()
-  const genderData = latestGenders.map((g) => ({ name: FORM_GENDER_LABELS[g.gender] ?? g.gender, value: g.percent }))
-
-  const latestAges = (() => {
-    for (let i = metrics.length - 1; i >= 0; i--) {
-      if (metrics[i].audience.age_ranges.length > 0) return metrics[i].audience.age_ranges
-    }
-    return []
-  })()
-  // Rollup só para o gráfico: soma mulheres+homens por faixa, já que cada faixa agora tem 2 linhas (uma por gênero).
-  const ageOrder = new Map<string, number>(AGE_RANGES.map((r, i) => [r, i]))
-  const ageTotals = new Map<string, number>()
-  for (const row of latestAges) ageTotals.set(row.age_range, (ageTotals.get(row.age_range) ?? 0) + row.percent)
-  const ageData = [...ageTotals.entries()]
-    .sort((a, b) => (ageOrder.get(a[0]) ?? 0) - (ageOrder.get(b[0]) ?? 0))
-    .map(([age_range, value]) => ({ name: age_range, value }))
 
   const latestCities = (() => {
     for (let i = metrics.length - 1; i >= 0; i--) {
@@ -188,52 +145,6 @@ export default function GrowthCharts({ metrics }: { metrics: DailyMetric[] }) {
             <Bar dataKey="views_posts" name="Posts" stackId="views" fill="url(#grad-blue)" />
             <Bar dataKey="views_reels" name="Reels" stackId="views" fill="url(#grad-purple)" radius={[6, 6, 0, 0]} />
           </BarChart>
-        </ResponsiveContainer>
-      </ChartCard>
-
-      <ChartCard title="Audiência por gênero" empty={genderData.length === 0}>
-        <ResponsiveContainer width="100%" height={260}>
-          <PieChart>
-            <GradientDefs />
-            <Pie
-              data={genderData}
-              dataKey="value"
-              nameKey="name"
-              innerRadius={55}
-              outerRadius={92}
-              paddingAngle={3}
-              style={{ filter: 'url(#chart-depth)' }}
-            >
-              {genderData.map((entry, i) => (
-                <Cell key={entry.name} fill={`url(#grad-${gradientAt(i).id})`} stroke="#0a0d1a" strokeWidth={2} />
-              ))}
-            </Pie>
-            <Legend wrapperStyle={{ color: '#9aa3c4', fontSize: 13 }} />
-            <Tooltip contentStyle={tooltipStyle} />
-          </PieChart>
-        </ResponsiveContainer>
-      </ChartCard>
-
-      <ChartCard title="Audiência por faixa etária" empty={ageData.length === 0}>
-        <ResponsiveContainer width="100%" height={260}>
-          <PieChart>
-            <GradientDefs />
-            <Pie
-              data={ageData}
-              dataKey="value"
-              nameKey="name"
-              innerRadius={55}
-              outerRadius={92}
-              paddingAngle={3}
-              style={{ filter: 'url(#chart-depth)' }}
-            >
-              {ageData.map((entry, i) => (
-                <Cell key={entry.name} fill={`url(#grad-${gradientAt(i).id})`} stroke="#0a0d1a" strokeWidth={2} />
-              ))}
-            </Pie>
-            <Legend wrapperStyle={{ color: '#9aa3c4', fontSize: 13 }} />
-            <Tooltip contentStyle={tooltipStyle} />
-          </PieChart>
         </ResponsiveContainer>
       </ChartCard>
 

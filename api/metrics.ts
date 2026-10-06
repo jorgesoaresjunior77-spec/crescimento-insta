@@ -9,14 +9,7 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-const AGE_RANGES = ["13-17", "18-24", "25-34", "35-44", "45-54", "55-64", "65+"] as const;
-const GENDERS = ["female", "male", "other"] as const;
-const AGE_RANGE_GENDERS = ["female", "male"] as const;
-
-const METRIC_TYPES = ["views", "interactions", "likes", "comments", "reposts", "shares", "saves", "replies"] as const;
-/** Subconjunto de METRIC_TYPES que mantém a divisão por público (audience_type obrigatório). Os demais exigem audience_type = null. */
-const AUDIENCE_SPLIT_METRIC_TYPES = ["views", "interactions"] as const;
-const AUDIENCE_TYPES = ["followers", "non_followers"] as const;
+const METRIC_TYPES = ["views", "interactions"] as const;
 const CONTENT_TYPES = ["reels", "posts", "stories"] as const;
 
 const BRAZIL_UF_CODES = [
@@ -27,9 +20,8 @@ const BRAZIL_UF_CODES = [
 
 /**
  * Campos escalares de `daily_metrics` (nível "dia", sem quebra por tipo de conteúdo).
- * As métricas por tipo de conteúdo (views/interactions/likes/comments/reposts/shares/
- * saves/replies × reels/posts/stories) vivem em `content_type_metrics` — ver
- * validateContentTypeMetrics/handlePost/handlePatch.
+ * Visualizações/Interações por tipo de conteúdo (reels/posts/stories) vivem em
+ * `content_type_metrics` — ver validateContentTypeMetrics/handlePost/handlePatch.
  */
 const OPTIONAL_METRIC_INT_FIELDS = [
   "reach",
@@ -43,7 +35,7 @@ const OPTIONAL_METRIC_INT_FIELDS = [
 type OptionalMetricIntField = (typeof OPTIONAL_METRIC_INT_FIELDS)[number];
 
 const METRIC_COLUMNS = `
-  id, account_id, date::text as date, followers, net_follows, reach, interactions, profile_visits,
+  id, account_id, date::text as date, followers, reach, interactions, profile_visits,
   posts_published, note, created_at,
   views_total, viewers_total, bio_link_taps
 `;
@@ -53,7 +45,6 @@ interface DailyMetricRow {
   account_id: string;
   date: string;
   followers: number;
-  net_follows: number | null;
   reach: number | null;
   interactions: number | null;
   profile_visits: number | null;
@@ -67,7 +58,6 @@ interface DailyMetricRow {
 
 interface ContentTypeMetricRow {
   metric_type: string;
-  audience_type: string | null;
   content_type: string;
   value: number;
 }
@@ -83,31 +73,11 @@ interface AudienceLocationRow {
   city_id: string | null;
   percent: number;
 }
-interface AudienceAgeRangeRow {
-  age_range: string;
-  gender: string;
-  percent: number;
-}
-interface AudienceGenderRow {
-  gender: string;
-  percent: number;
-}
-interface AudienceCountryRow {
-  country_code: string;
-  country_name: string;
-  percent: number;
-}
 interface Audience {
   locations: AudienceLocationRow[];
-  age_ranges: AudienceAgeRangeRow[];
-  genders: AudienceGenderRow[];
-  countries: AudienceCountryRow[];
 }
 interface AudienceInput {
   locations: AudienceLocationInput[];
-  age_ranges: AudienceAgeRangeRow[];
-  genders: AudienceGenderRow[];
-  countries: AudienceCountryRow[];
 }
 
 function json(body: unknown, status: number): Response {
@@ -143,20 +113,6 @@ function validateNonNegInt(value: unknown, label: string, required: boolean): In
   }
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
     return { ok: false, error: `${label} deve ser um número inteiro maior ou igual a 0.` };
-  }
-  return { ok: true, value };
-}
-
-/** Igual a validateNonNegInt, mas aceita negativos — usado só por `net_follows`. */
-function validateSignedInt(value: unknown, label: string, required: boolean): IntFieldResult {
-  if (value === undefined || value === null) {
-    if (required) {
-      return { ok: false, error: `${label} é obrigatório e deve ser um número inteiro.` };
-    }
-    return { ok: true, value: null };
-  }
-  if (typeof value !== "number" || !Number.isInteger(value)) {
-    return { ok: false, error: `${label} deve ser um número inteiro.` };
   }
   return { ok: true, value };
 }
@@ -211,13 +167,8 @@ type ContentTypeMetricsResult =
   | { ok: false; error: string };
 
 /**
- * `content_type_metrics`: cada item é uma combinação (metric_type, audience_type,
- * content_type) -> value. "TUDO" (agrupador visual do bloco Interações no formulário)
- * nunca vira uma linha aqui — é só um elemento visual do layout.
- *
- * audience_type é obrigatório ('followers'/'non_followers') para
- * AUDIENCE_SPLIT_METRIC_TYPES (views/interactions) e proibido (deve ficar ausente/null)
- * para os demais metric_types — espelha a CHECK de correlação no banco.
+ * `content_type_metrics`: cada item é uma combinação (metric_type, content_type) ->
+ * value (total único, sem divisão por público). metric_type aceita só views/interactions.
  */
 function validateContentTypeMetrics(raw: unknown): ContentTypeMetricsResult {
   if (raw === undefined || raw === null) return { ok: true, value: [] };
@@ -233,35 +184,18 @@ function validateContentTypeMetrics(raw: unknown): ContentTypeMetricsResult {
     if (typeof metricType !== "string" || !(METRIC_TYPES as readonly string[]).includes(metricType)) {
       return { ok: false, error: `content_type_metrics: 'metric_type' deve ser um de: ${METRIC_TYPES.join(", ")}.` };
     }
-    const requiresAudience = (AUDIENCE_SPLIT_METRIC_TYPES as readonly string[]).includes(metricType);
-    const rawAudienceType = record.audience_type;
-    let audienceType: string | null;
-    if (requiresAudience) {
-      if (typeof rawAudienceType !== "string" || !(AUDIENCE_TYPES as readonly string[]).includes(rawAudienceType)) {
-        return {
-          ok: false,
-          error: `content_type_metrics (${metricType}): 'audience_type' é obrigatório e deve ser um de: ${AUDIENCE_TYPES.join(", ")}.`,
-        };
-      }
-      audienceType = rawAudienceType;
-    } else {
-      if (rawAudienceType !== undefined && rawAudienceType !== null) {
-        return { ok: false, error: `content_type_metrics (${metricType}): 'audience_type' não é permitido para este metric_type.` };
-      }
-      audienceType = null;
-    }
     const contentType = record.content_type;
     if (typeof contentType !== "string" || !(CONTENT_TYPES as readonly string[]).includes(contentType)) {
       return { ok: false, error: `content_type_metrics: 'content_type' deve ser um de: ${CONTENT_TYPES.join(", ")}.` };
     }
-    const key = `${metricType}|${audienceType ?? "none"}|${contentType}`;
+    const key = `${metricType}|${contentType}`;
     const value = validateNonNegInt(record.value, `content_type_metrics (${key}) value`, true);
     if (!value.ok) return { ok: false, error: value.error };
     if (seen.has(key)) {
       return { ok: false, error: `Combinação duplicada em content_type_metrics: ${key}.` };
     }
     seen.add(key);
-    out.push({ metric_type: metricType, audience_type: audienceType, content_type: contentType, value: value.value as number });
+    out.push({ metric_type: metricType, content_type: contentType, value: value.value as number });
   }
   return { ok: true, value: out };
 }
@@ -310,125 +244,25 @@ function validateAudienceLocations(raw: unknown): { ok: true; value: AudienceLoc
   return { ok: true, value: out };
 }
 
-function validateAudienceAgeRanges(raw: unknown): { ok: true; value: AudienceAgeRangeRow[] } | { ok: false; error: string } {
-  if (raw === undefined || raw === null) return { ok: true, value: [] };
-  if (!Array.isArray(raw)) return { ok: false, error: "audience.age_ranges deve ser uma lista." };
-  const seen = new Set<string>();
-  const out: AudienceAgeRangeRow[] = [];
-  for (const item of raw) {
-    if (typeof item !== "object" || item === null) {
-      return { ok: false, error: "Cada item de audience.age_ranges deve ser um objeto." };
-    }
-    const record = item as Record<string, unknown>;
-    const ageRange = record.age_range;
-    if (typeof ageRange !== "string" || !(AGE_RANGES as readonly string[]).includes(ageRange)) {
-      return { ok: false, error: `audience.age_ranges: 'age_range' deve ser uma de: ${AGE_RANGES.join(", ")}.` };
-    }
-    const gender = record.gender;
-    if (typeof gender !== "string" || !(AGE_RANGE_GENDERS as readonly string[]).includes(gender)) {
-      return { ok: false, error: `audience.age_ranges (${ageRange}): 'gender' deve ser um de: ${AGE_RANGE_GENDERS.join(", ")}.` };
-    }
-    const percent = validatePercent(record.percent, `audience.age_ranges (${ageRange}/${gender}) percent`);
-    if (!percent.ok) return { ok: false, error: percent.error };
-    const key = `${ageRange}|${gender}`;
-    if (seen.has(key)) {
-      return { ok: false, error: `Combinação duplicada em audience.age_ranges: ${ageRange} / ${gender}.` };
-    }
-    seen.add(key);
-    out.push({ age_range: ageRange, gender, percent: percent.value });
-  }
-  return { ok: true, value: out };
-}
-
-function validateAudienceGenders(raw: unknown): { ok: true; value: AudienceGenderRow[] } | { ok: false; error: string } {
-  if (raw === undefined || raw === null) return { ok: true, value: [] };
-  if (!Array.isArray(raw)) return { ok: false, error: "audience.genders deve ser uma lista." };
-  const seen = new Set<string>();
-  const out: AudienceGenderRow[] = [];
-  for (const item of raw) {
-    if (typeof item !== "object" || item === null) {
-      return { ok: false, error: "Cada item de audience.genders deve ser um objeto." };
-    }
-    const record = item as Record<string, unknown>;
-    const gender = record.gender;
-    if (typeof gender !== "string" || !(GENDERS as readonly string[]).includes(gender)) {
-      return { ok: false, error: `audience.genders: 'gender' deve ser um de: ${GENDERS.join(", ")}.` };
-    }
-    const percent = validatePercent(record.percent, `audience.genders (${gender}) percent`);
-    if (!percent.ok) return { ok: false, error: percent.error };
-    if (seen.has(gender)) {
-      return { ok: false, error: `Gênero duplicado em audience.genders: ${gender}.` };
-    }
-    seen.add(gender);
-    out.push({ gender, percent: percent.value });
-  }
-  return { ok: true, value: out };
-}
-
-const COUNTRY_CODE_RE = /^[A-Z]{2}$/;
-
-function validateAudienceCountries(raw: unknown): { ok: true; value: AudienceCountryRow[] } | { ok: false; error: string } {
-  if (raw === undefined || raw === null) return { ok: true, value: [] };
-  if (!Array.isArray(raw)) return { ok: false, error: "audience.countries deve ser uma lista." };
-  const seen = new Set<string>();
-  const out: AudienceCountryRow[] = [];
-  for (const item of raw) {
-    if (typeof item !== "object" || item === null) {
-      return { ok: false, error: "Cada item de audience.countries deve ser um objeto." };
-    }
-    const record = item as Record<string, unknown>;
-    const rawCode = record.country_code;
-    if (typeof rawCode !== "string" || rawCode.trim() === "") {
-      return { ok: false, error: "audience.countries: 'country_code' é obrigatório." };
-    }
-    const countryCode = rawCode.trim().toUpperCase();
-    if (!COUNTRY_CODE_RE.test(countryCode)) {
-      return { ok: false, error: `audience.countries: 'country_code' (${rawCode}) deve ter exatamente 2 letras (ISO 3166-1 alpha-2).` };
-    }
-    const countryName = record.country_name;
-    if (typeof countryName !== "string" || countryName.trim() === "") {
-      return { ok: false, error: `audience.countries (${countryCode}): 'country_name' é obrigatório.` };
-    }
-    const percent = validatePercent(record.percent, `audience.countries (${countryCode}) percent`);
-    if (!percent.ok) return { ok: false, error: percent.error };
-    if (seen.has(countryCode)) {
-      return { ok: false, error: `País duplicado em audience.countries: ${countryCode}.` };
-    }
-    seen.add(countryCode);
-    out.push({ country_code: countryCode, country_name: countryName.trim(), percent: percent.value });
-  }
-  return { ok: true, value: out };
-}
-
 function validateAudience(raw: unknown): AudienceResult {
   if (raw === undefined || raw === null) {
-    return { ok: true, value: { locations: [], age_ranges: [], genders: [], countries: [] } };
+    return { ok: true, value: { locations: [] } };
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {
-    return { ok: false, error: "audience deve ser um objeto com locations/age_ranges/genders/countries." };
+    return { ok: false, error: "audience deve ser um objeto com locations." };
   }
   const obj = raw as Record<string, unknown>;
   const locations = validateAudienceLocations(obj.locations);
   if (!locations.ok) return locations;
-  const ageRanges = validateAudienceAgeRanges(obj.age_ranges);
-  if (!ageRanges.ok) return ageRanges;
-  const genders = validateAudienceGenders(obj.genders);
-  if (!genders.ok) return genders;
-  const countries = validateAudienceCountries(obj.countries);
-  if (!countries.ok) return countries;
-  return { ok: true, value: { locations: locations.value, age_ranges: ageRanges.value, genders: genders.value, countries: countries.value } };
+  return { ok: true, value: { locations: locations.value } };
 }
 
 function emptyAudience(): Audience {
-  return { locations: [], age_ranges: [], genders: [], countries: [] };
+  return { locations: [] };
 }
 
 function withSortedAudience(audience: Audience): Audience {
-  return {
-    ...audience,
-    locations: [...audience.locations].sort((a, b) => b.percent - a.percent),
-    countries: [...audience.countries].sort((a, b) => b.percent - a.percent),
-  };
+  return { locations: [...audience.locations].sort((a, b) => b.percent - a.percent) };
 }
 
 /**
@@ -451,29 +285,19 @@ async function resolveCityId(sql: ReturnType<typeof neon>, name: string, state: 
 }
 
 async function fetchAudienceForId(sql: ReturnType<typeof neon>, dailyMetricId: string): Promise<Audience> {
-  const [locationRows, ageRangeRows, genderRows, countryRows] = await Promise.all([
-    sql`
-      select al.city, al.city_id, c.state, al.percent::float8 as percent
-      from audience_locations al
-      left join cities c on c.id = al.city_id
-      where al.daily_metric_id = ${dailyMetricId}
-      order by al.percent desc
-    `,
-    sql`select age_range, gender, percent::float8 as percent from audience_age_ranges where daily_metric_id = ${dailyMetricId}`,
-    sql`select gender, percent::float8 as percent from audience_genders where daily_metric_id = ${dailyMetricId}`,
-    sql`select country_code, country_name, percent::float8 as percent from audience_countries where daily_metric_id = ${dailyMetricId} order by percent desc`,
-  ]);
-  return {
-    locations: locationRows as AudienceLocationRow[],
-    age_ranges: ageRangeRows as AudienceAgeRangeRow[],
-    genders: genderRows as AudienceGenderRow[],
-    countries: countryRows as AudienceCountryRow[],
-  };
+  const locationRows = await sql`
+    select al.city, al.city_id, c.state, al.percent::float8 as percent
+    from audience_locations al
+    left join cities c on c.id = al.city_id
+    where al.daily_metric_id = ${dailyMetricId}
+    order by al.percent desc
+  `;
+  return { locations: locationRows as AudienceLocationRow[] };
 }
 
 async function fetchContentTypeMetricsForId(sql: ReturnType<typeof neon>, dailyMetricId: string): Promise<ContentTypeMetricRow[]> {
   const rows = await sql`
-    select metric_type, audience_type, content_type, value
+    select metric_type, content_type, value
     from content_type_metrics
     where daily_metric_id = ${dailyMetricId}
   `;
@@ -509,7 +333,7 @@ async function handleGet(request: Request, sql: ReturnType<typeof neon>): Promis
       order by date asc
     `) as DailyMetricRow[];
 
-    const [locationRows, ageRangeRows, genderRows, countryRows, contentTypeRows] = await Promise.all([
+    const [locationRows, contentTypeRows] = await Promise.all([
       sql`
         select al.daily_metric_id, al.city, al.city_id, c.state, al.percent::float8 as percent
         from audience_locations al
@@ -521,32 +345,7 @@ async function handleGet(request: Request, sql: ReturnType<typeof neon>): Promis
         order by al.percent desc
       `,
       sql`
-        select aar.daily_metric_id, aar.age_range, aar.gender, aar.percent::float8 as percent
-        from audience_age_ranges aar
-        join daily_metrics dm on dm.id = aar.daily_metric_id
-        where dm.account_id = ${accountId}
-          and (${from}::date is null or dm.date >= ${from}::date)
-          and (${to}::date is null or dm.date <= ${to}::date)
-      `,
-      sql`
-        select ag.daily_metric_id, ag.gender, ag.percent::float8 as percent
-        from audience_genders ag
-        join daily_metrics dm on dm.id = ag.daily_metric_id
-        where dm.account_id = ${accountId}
-          and (${from}::date is null or dm.date >= ${from}::date)
-          and (${to}::date is null or dm.date <= ${to}::date)
-      `,
-      sql`
-        select ac.daily_metric_id, ac.country_code, ac.country_name, ac.percent::float8 as percent
-        from audience_countries ac
-        join daily_metrics dm on dm.id = ac.daily_metric_id
-        where dm.account_id = ${accountId}
-          and (${from}::date is null or dm.date >= ${from}::date)
-          and (${to}::date is null or dm.date <= ${to}::date)
-        order by ac.percent desc
-      `,
-      sql`
-        select ctm.daily_metric_id, ctm.metric_type, ctm.audience_type, ctm.content_type, ctm.value
+        select ctm.daily_metric_id, ctm.metric_type, ctm.content_type, ctm.value
         from content_type_metrics ctm
         join daily_metrics dm on dm.id = ctm.daily_metric_id
         where dm.account_id = ${accountId}
@@ -565,19 +364,9 @@ async function handleGet(request: Request, sql: ReturnType<typeof neon>): Promis
         percent: row.percent,
       });
     }
-    for (const row of ageRangeRows as Array<{ daily_metric_id: string; age_range: string; gender: string; percent: number }>) {
-      byId.get(row.daily_metric_id)?.audience.age_ranges.push({ age_range: row.age_range, gender: row.gender, percent: row.percent });
-    }
-    for (const row of genderRows as Array<{ daily_metric_id: string; gender: string; percent: number }>) {
-      byId.get(row.daily_metric_id)?.audience.genders.push({ gender: row.gender, percent: row.percent });
-    }
-    for (const row of countryRows as Array<{ daily_metric_id: string; country_code: string; country_name: string; percent: number }>) {
-      byId.get(row.daily_metric_id)?.audience.countries.push({ country_code: row.country_code, country_name: row.country_name, percent: row.percent });
-    }
-    for (const row of contentTypeRows as Array<{ daily_metric_id: string; metric_type: string; audience_type: string | null; content_type: string; value: number }>) {
+    for (const row of contentTypeRows as Array<{ daily_metric_id: string; metric_type: string; content_type: string; value: number }>) {
       byId.get(row.daily_metric_id)?.content_type_metrics.push({
         metric_type: row.metric_type,
-        audience_type: row.audience_type,
         content_type: row.content_type,
         value: row.value,
       });
@@ -607,9 +396,6 @@ async function handlePost(request: Request, sql: ReturnType<typeof neon>): Promi
 
   const followers = validateNonNegInt(body.followers, "followers", true);
   if (!followers.ok) return errorResponse(followers.error, 400);
-
-  const netFollows = validateSignedInt(body.net_follows, "net_follows", false);
-  if (!netFollows.ok) return errorResponse(netFollows.error, 400);
 
   const optionalInts = {} as Record<OptionalMetricIntField, number | null>;
   for (const field of OPTIONAL_METRIC_INT_FIELDS) {
@@ -661,10 +447,10 @@ async function handlePost(request: Request, sql: ReturnType<typeof neon>): Promi
     const queries = [
       sql`
         insert into daily_metrics
-          (id, account_id, date, followers, net_follows, reach, interactions, profile_visits, posts_published, note,
+          (id, account_id, date, followers, reach, interactions, profile_visits, posts_published, note,
            views_total, viewers_total, bio_link_taps)
         values
-          (${newId}, ${accountId}, ${date}, ${followers.value}, ${netFollows.value}, ${o.reach}, ${o.interactions},
+          (${newId}, ${accountId}, ${date}, ${followers.value}, ${o.reach}, ${o.interactions},
            ${o.profile_visits}, ${o.posts_published}, ${note.value},
            ${o.views_total}, ${o.viewers_total}, ${o.bio_link_taps})
         returning ${sql.unsafe(METRIC_COLUMNS)}
@@ -672,34 +458,19 @@ async function handlePost(request: Request, sql: ReturnType<typeof neon>): Promi
       ...resolvedLocations.map(
         (loc) => sql`insert into audience_locations (daily_metric_id, city, city_id, percent) values (${newId}, ${loc.city}, ${loc.city_id}, ${loc.percent})`,
       ),
-      ...audience.value.age_ranges.map(
-        (a) => sql`insert into audience_age_ranges (daily_metric_id, age_range, gender, percent) values (${newId}, ${a.age_range}, ${a.gender}, ${a.percent})`,
-      ),
-      ...audience.value.genders.map(
-        (g) => sql`insert into audience_genders (daily_metric_id, gender, percent) values (${newId}, ${g.gender}, ${g.percent})`,
-      ),
-      ...audience.value.countries.map(
-        (c) => sql`insert into audience_countries (daily_metric_id, country_code, country_name, percent) values (${newId}, ${c.country_code}, ${c.country_name}, ${c.percent})`,
-      ),
       ...contentTypeMetrics.value.map(
-        (m) => sql`insert into content_type_metrics (daily_metric_id, metric_type, audience_type, content_type, value) values (${newId}, ${m.metric_type}, ${m.audience_type}, ${m.content_type}, ${m.value})`,
+        (m) => sql`insert into content_type_metrics (daily_metric_id, metric_type, content_type, value) values (${newId}, ${m.metric_type}, ${m.content_type}, ${m.value})`,
       ),
     ];
 
     const results = await sql.transaction(queries);
     const inserted = (results[0] as unknown as DailyMetricRow[])[0];
-    const responseAudience: Audience = {
-      locations: resolvedLocations,
-      age_ranges: audience.value.age_ranges,
-      genders: audience.value.genders,
-      countries: audience.value.countries,
-    };
     return json(
       {
         metric: {
           ...inserted,
           content_type_metrics: contentTypeMetrics.value,
-          audience: withSortedAudience(responseAudience),
+          audience: withSortedAudience({ locations: resolvedLocations }),
         },
       },
       201,
@@ -751,13 +522,6 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
     followers = result.value as number;
   }
 
-  let netFollowsUpdate: number | null | undefined;
-  if (has("net_follows")) {
-    const result = validateSignedInt(body.net_follows, "net_follows", false);
-    if (!result.ok) return errorResponse(result.error, 400);
-    netFollowsUpdate = result.value;
-  }
-
   const optionalIntUpdates = {} as Partial<Record<OptionalMetricIntField, number | null>>;
   for (const field of OPTIONAL_METRIC_INT_FIELDS) {
     if (has(field)) {
@@ -791,7 +555,6 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
   const hasAnyUpdate =
     date !== undefined ||
     followers !== undefined ||
-    netFollowsUpdate !== undefined ||
     note !== undefined ||
     Object.keys(optionalIntUpdates).length > 0 ||
     contentTypeMetricsUpdate !== undefined ||
@@ -818,7 +581,6 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
       ...current,
       date: date ?? current.date,
       followers: followers ?? current.followers,
-      net_follows: has("net_follows") ? (netFollowsUpdate ?? null) : current.net_follows,
       note: note !== undefined ? note : current.note,
       ...mergedOptionalInts,
     };
@@ -857,7 +619,6 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
         update daily_metrics set
           date = ${m.date},
           followers = ${m.followers},
-          net_follows = ${m.net_follows},
           reach = ${m.reach},
           interactions = ${m.interactions},
           profile_visits = ${m.profile_visits},
@@ -874,20 +635,8 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
     if (audienceUpdate && resolvedLocations) {
       queries.push(
         sql`delete from audience_locations where daily_metric_id = ${id}`,
-        sql`delete from audience_age_ranges where daily_metric_id = ${id}`,
-        sql`delete from audience_genders where daily_metric_id = ${id}`,
-        sql`delete from audience_countries where daily_metric_id = ${id}`,
         ...resolvedLocations.map(
           (loc) => sql`insert into audience_locations (daily_metric_id, city, city_id, percent) values (${id}, ${loc.city}, ${loc.city_id}, ${loc.percent})`,
-        ),
-        ...audienceUpdate.age_ranges.map(
-          (a) => sql`insert into audience_age_ranges (daily_metric_id, age_range, gender, percent) values (${id}, ${a.age_range}, ${a.gender}, ${a.percent})`,
-        ),
-        ...audienceUpdate.genders.map(
-          (g) => sql`insert into audience_genders (daily_metric_id, gender, percent) values (${id}, ${g.gender}, ${g.percent})`,
-        ),
-        ...audienceUpdate.countries.map(
-          (c) => sql`insert into audience_countries (daily_metric_id, country_code, country_name, percent) values (${id}, ${c.country_code}, ${c.country_name}, ${c.percent})`,
         ),
       );
     }
@@ -896,7 +645,7 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
       queries.push(
         sql`delete from content_type_metrics where daily_metric_id = ${id}`,
         ...contentTypeMetricsUpdate.map(
-          (cm) => sql`insert into content_type_metrics (daily_metric_id, metric_type, audience_type, content_type, value) values (${id}, ${cm.metric_type}, ${cm.audience_type}, ${cm.content_type}, ${cm.value})`,
+          (cm) => sql`insert into content_type_metrics (daily_metric_id, metric_type, content_type, value) values (${id}, ${cm.metric_type}, ${cm.content_type}, ${cm.value})`,
         ),
       );
     }
@@ -905,7 +654,7 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
     const updated = (results[0] as unknown as DailyMetricRow[])[0];
     const audienceForResponse =
       audienceUpdate && resolvedLocations
-        ? withSortedAudience({ locations: resolvedLocations, age_ranges: audienceUpdate.age_ranges, genders: audienceUpdate.genders, countries: audienceUpdate.countries })
+        ? withSortedAudience({ locations: resolvedLocations })
         : withSortedAudience(await fetchAudienceForId(sql, id));
     const contentTypeMetricsForResponse = contentTypeMetricsUpdate ?? (await fetchContentTypeMetricsForId(sql, id));
     return json({ metric: { ...updated, content_type_metrics: contentTypeMetricsForResponse, audience: audienceForResponse } }, 200);
@@ -923,8 +672,9 @@ async function handlePatch(request: Request, sql: ReturnType<typeof neon>): Prom
 }
 
 /**
- * DELETE não precisa apagar manualmente content_type_metrics/audience_* — todas as
- * tabelas filhas têm `daily_metric_id` com `ON DELETE CASCADE` para `daily_metrics(id)`.
+ * DELETE não precisa apagar manualmente content_type_metrics/audience_locations —
+ * todas as tabelas filhas têm `daily_metric_id` com `ON DELETE CASCADE` para
+ * `daily_metrics(id)`.
  */
 async function handleDelete(request: Request, sql: ReturnType<typeof neon>): Promise<Response> {
   const url = new URL(request.url);
